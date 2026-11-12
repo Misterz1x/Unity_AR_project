@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 777bd8c4ae14c7f4ebc11672622d1e85
+timeCreated: 1430393365
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 371146
+  packageName: Mini Golf Multiplayer - Photon Quantum
+  packageVersion: 1.0
+  assetPath: Assets/ThirdParty/Kenney 3D Minigolf Pack/Materials/BackColor.mat
+  uploadId: 899424

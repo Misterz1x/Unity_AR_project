@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: ced923950e748a54ca4974fe081e9900
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 371146
+  packageName: Mini Golf Multiplayer - Photon Quantum
+  packageVersion: 1.0
+  assetPath: Assets/ThirdParty/Kenney 3D Minigolf Pack/License.txt
+  uploadId: 899424

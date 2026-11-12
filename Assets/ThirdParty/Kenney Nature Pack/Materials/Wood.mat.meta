@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 4ce07ef0402cdad4f83eb94473afc47f
+timeCreated: 1466334982
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 371146
+  packageName: Mini Golf Multiplayer - Photon Quantum
+  packageVersion: 1.0
+  assetPath: Assets/ThirdParty/Kenney Nature Pack/Materials/Wood.mat
+  uploadId: 899424

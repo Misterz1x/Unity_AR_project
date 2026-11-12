@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 85c55f33a90f1774b94434ad53ca3a0e
+timeCreated: 1466334984
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 371146
+  packageName: Mini Golf Multiplayer - Photon Quantum
+  packageVersion: 1.0
+  assetPath: Assets/ThirdParty/Kenney Nature Pack/Materials/Fall_Leafs.mat
+  uploadId: 899424

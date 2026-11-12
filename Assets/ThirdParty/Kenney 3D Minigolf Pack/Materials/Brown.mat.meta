@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 73a50ca1221fabf41bec922a000da961
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 371146
+  packageName: Mini Golf Multiplayer - Photon Quantum
+  packageVersion: 1.0
+  assetPath: Assets/ThirdParty/Kenney 3D Minigolf Pack/Materials/Brown.mat
+  uploadId: 899424
