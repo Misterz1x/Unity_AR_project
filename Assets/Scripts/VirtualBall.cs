@@ -44,6 +44,9 @@ public class VirtualBall : MonoBehaviour
         if (launcher != null) launcher.Launched -= OnLaunched;
     }
 
+    /// <summary>Launch from any input method (keyboard aim + power gauge, tracking, ...).</summary>
+    public void Launch(LaunchResult launch) => OnLaunched(launch);
+
     void OnLaunched(LaunchResult launch)
     {
         if (IsRolling || hole == null)
@@ -95,6 +98,13 @@ public class VirtualBall : MonoBehaviour
         transform.SetPositionAndRotation(startPosition, Quaternion.identity);
         SetVisible(true);
         if (launcher != null) launcher.inputEnabled = true;
+    }
+
+    /// <summary>Moves the ball's starting spot (ball centre) and puts the ball there.</summary>
+    public void PlaceAt(Vector3 position)
+    {
+        startPosition = position;
+        ResetBall();
     }
 
     void SetVisible(bool visible)
