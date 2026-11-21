@@ -8,7 +8,7 @@ using UnityEngine;
 /// Builds the mesh and texture in code, at runtime and in the Editor (so it also works when the
 /// green is placed in AR). The object's position is the green centre, its Y rotation turns the green.
 /// Texture: grass with mowing stripes; optional slope colours (green = flat ... red = too steep to stop on)
-/// and contour lines every few cm of height; the active hole is a dark disc.
+/// and contour lines every few cm of height. The active hole is a small disc mesh on the surface.
 /// </summary>
 [ExecuteAlways]
 public class GreenView : MonoBehaviour
@@ -22,9 +22,13 @@ public class GreenView : MonoBehaviour
     [Header("Look")]
     [Tooltip("Drawn height = real height × this. 0 = flat (e.g. in AR on a real floor), 1 = real, 3 = exaggerated.")]
     [Range(0f, 5f)] public float visualHeightScale = 1f;
+    [Tooltip("Height lines, like a map: thin every Contour Interval, stronger every 5th.")]
+    public bool showContours;
     public bool showSlopeColours;
-    [Tooltip("Height between contour lines (m). 0 = no lines.")]
+    [Tooltip("Height between contour lines (m).")]
     public float contourInterval = 0.02f;
+    [Tooltip("Width of a contour line on the ground (m).")]
+    public float contourWidth = 0.012f;
     [Tooltip("URP Lit material for the green; its base map is replaced by the generated texture.")]
     public Material greenMaterial;
     public Material fringeMaterial;
@@ -56,9 +60,10 @@ public class GreenView : MonoBehaviour
     MeshRenderer meshRenderer;
     Mesh mesh;
     Texture2D texture;
-    Color32[] basePixels; // grass, slope colours and contours, without the hole
-    int stampedPin = -1;
     Material greenInstance, fringeInstance;
+    GameObject cup;
+    Mesh cupMesh;
+    Material cupInstance, rimInstance;
     LineRenderer idealLine, pathLine;
     bool dirty = true;
     Vector3 builtPosition;
@@ -78,7 +83,7 @@ public class GreenView : MonoBehaviour
         pin = pinIndex;
         if (Model == null) return;
         pin = Mathf.Clamp(pin, 0, Mathf.Max(0, Model.Definition.pins.Count - 1));
-        if (pin != stampedPin) StampHole();
+        UpdateCup();
     }
 
     /// <summary>Roll settings with this green's speed, keeping the ball and hole sizes from template.</summary>
@@ -171,9 +176,13 @@ public class GreenView : MonoBehaviour
         Release(texture);
         Release(greenInstance);
         Release(fringeInstance);
+        Release(cupMesh);
+        Release(cupInstance);
+        Release(rimInstance);
         mesh = null;
         texture = null;
-        greenInstance = fringeInstance = null;
+        cupMesh = null;
+        greenInstance = fringeInstance = cupInstance = rimInstance = null;
     }
 
     // ------------------------------------------------------------------ building
@@ -202,6 +211,7 @@ public class GreenView : MonoBehaviour
         meshRenderer.sharedMaterials = new[] { greenInstance, fringeInstance };
 
         RebuildTexture();
+        UpdateCup();
         ClearPaths();
         Rebuilt?.Invoke();
     }
@@ -330,32 +340,60 @@ public class GreenView : MonoBehaviour
         float holding = Model.MakeRollSettings().MaxHoldingSlope;
         float texel = size / res;
         var pixels = new Color32[res * res];
+        bool needHeights = showContours || showSlopeColours;
+
+        // Smooth heights from the feature formulas (not the 10 cm grid), shifted like the model.
+        float[] heights = null;
+        if (needHeights)
+        {
+            GreenDefinition d = Model.Definition;
+            float offset = d.FeatureHeightAt(Model.Heights.Origin) - Model.Heights[0, 0];
+            heights = new float[res * res];
+            for (int y = 0; y < res; y++)
+                for (int x = 0; x < res; x++)
+                    heights[x + y * res] = d.FeatureHeightAt(min + new Vector2((x + 0.5f) * texel, (y + 0.5f) * texel)) - offset;
+        }
 
         for (int y = 0; y < res; y++)
         {
             for (int x = 0; x < res; x++)
             {
-                Vector2 p = min + new Vector2((x + 0.5f) * texel, (y + 0.5f) * texel);
-                Color c = Mathf.Repeat(p.y, 2f * StripeWidth) < StripeWidth ? GrassLight : GrassDark;
+                float stripeY = min.y + (y + 0.5f) * texel;
+                // Soft edge between mowing stripes.
+                float stripe = Mathf.Repeat(stripeY, 2f * StripeWidth) / StripeWidth; // 0..2
+                float light = Mathf.Clamp01(Mathf.Min(Mathf.Abs(stripe - 0f), Mathf.Abs(stripe - 1f), Mathf.Abs(stripe - 2f)) * StripeWidth / (2f * texel));
+                Color c = stripe < 1f ? Color.Lerp(GrassDark, GrassLight, 0.5f + 0.5f * light) : Color.Lerp(GrassLight, GrassDark, 0.5f + 0.5f * light);
 
-                float slope = Mathf.Max(Model.SlopeAt(p).magnitude, 1e-4f);
-                if (showSlopeColours)
-                    c = Color.Lerp(c, SlopeColour(slope / holding), 0.6f);
-
-                if (contourInterval > 0f)
+                if (needHeights)
                 {
-                    float h = Model.HeightAt(p) / contourInterval;
-                    float distToLine = Mathf.Abs(h - Mathf.Round(h)) * contourInterval;
-                    // Lines about one texel wide on the ground, wherever the slope is.
-                    if (distToLine / slope < 0.8f * texel)
-                        c = Color.Lerp(c, Color.black, 0.35f);
+                    int k = x + y * res;
+                    int xl = Mathf.Max(0, x - 1), xr = Mathf.Min(res - 1, x + 1);
+                    int yd = Mathf.Max(0, y - 1), yu = Mathf.Min(res - 1, y + 1);
+                    float gx = (heights[xr + y * res] - heights[xl + y * res]) / ((xr - xl) * texel);
+                    float gy = (heights[x + yu * res] - heights[x + yd * res]) / ((yu - yd) * texel);
+                    float slope = Mathf.Sqrt(gx * gx + gy * gy);
+
+                    if (showSlopeColours)
+                        c = Color.Lerp(c, SlopeColour(slope / holding), 0.55f);
+
+                    if (showContours && contourInterval > 0f)
+                    {
+                        float level = heights[k] / contourInterval;
+                        float nearest = Mathf.Round(level);
+                        // Distance to the nearest line on the ground (m), from height distance / slope.
+                        float dist = Mathf.Abs(level - nearest) * contourInterval / Mathf.Max(slope, 1e-4f);
+                        bool major = Mathf.Abs(Mathf.Repeat(nearest, 5f)) < 0.5f;
+                        float half = (major ? 1.8f : 1f) * Mathf.Max(contourWidth, texel) * 0.5f;
+                        float coverage = Mathf.Clamp01(1f - (dist - half) / texel); // 1 texel soft edge
+                        c = Color.Lerp(c, new Color(0.08f, 0.2f, 0.05f), coverage * (major ? 0.55f : 0.35f));
+                    }
                 }
 
                 pixels[x + y * res] = c;
             }
         }
-        basePixels = pixels;
-        StampHole();
+        texture.SetPixels32(pixels);
+        texture.Apply(true);
 
         if (greenInstance != null)
         {
@@ -364,32 +402,68 @@ public class GreenView : MonoBehaviour
         }
     }
 
-    // Copies the base texture and draws the active hole (dark disc with a light rim).
-    void StampHole()
+    // The active hole: a dark disc with a light rim, as a small mesh that follows the green's surface,
+    // so it stays round and sharp at any distance.
+    void UpdateCup()
     {
-        if (Model == null || texture == null || basePixels == null) return;
-        TextureFrame(Model, out Vector2 min, out float size);
-        int res = texture.width;
-        float texel = size / res;
-        var pixels = (Color32[])basePixels.Clone();
+        if (Model == null) return;
+        if (cup == null)
+        {
+            Transform existing = transform.Find("Cup");
+            cup = existing != null ? existing.gameObject : new GameObject("Cup");
+            cup.hideFlags = HideFlags.DontSave;
+            cup.transform.SetParent(transform, false);
+            cup.transform.localPosition = Vector3.zero;
+            cup.transform.localRotation = Quaternion.identity;
+            if (cup.GetComponent<MeshFilter>() == null) cup.AddComponent<MeshFilter>();
+            var r = cup.GetComponent<MeshRenderer>();
+            if (r == null) r = cup.AddComponent<MeshRenderer>();
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+        if (cupInstance == null)
+        {
+            cupInstance = MakeMaterial(null, new Color(0.04f, 0.04f, 0.04f));
+            rimInstance = MakeMaterial(null, new Color(0.85f, 0.85f, 0.82f));
+        }
+
         Vector2 hole = Model.PinPosition(pin);
-        float holeR = Model.MakeRollSettings().HoleRadius;
+        float r0 = Model.MakeRollSettings().HoleRadius, r1 = r0 + 0.004f;
+        const int n = 48;
+        const float lift = 0.0015f;
+        var vertices = new List<Vector3>();
+        Vector3 Point(Vector2 local) => new Vector3(local.x, visualHeightScale * Model.HeightAt(local) + lift, local.y);
 
-        int cx = Mathf.FloorToInt((hole.x - min.x) / texel), cy = Mathf.FloorToInt((hole.y - min.y) / texel);
-        int reach = Mathf.CeilToInt(holeR / texel) + 2;
-        for (int y = Mathf.Max(0, cy - reach); y <= Mathf.Min(res - 1, cy + reach); y++)
-            for (int x = Mathf.Max(0, cx - reach); x <= Mathf.Min(res - 1, cx + reach); x++)
-            {
-                Vector2 p = min + new Vector2((x + 0.5f) * texel, (y + 0.5f) * texel);
-                float d = (p - hole).magnitude;
-                int k = x + y * res;
-                if (d < holeR) pixels[k] = new Color32(13, 13, 13, 255);
-                else if (d < holeR + texel) pixels[k] = Color32.Lerp(pixels[k], new Color32(255, 255, 255, 255), 0.6f);
-            }
+        vertices.Add(Point(hole));
+        for (int k = 0; k < n; k++)
+        {
+            float a = 2f * Mathf.PI * k / n;
+            vertices.Add(Point(hole + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r0));
+        }
+        for (int k = 0; k < n; k++)
+        {
+            float a = 2f * Mathf.PI * k / n;
+            vertices.Add(Point(hole + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r1));
+        }
 
-        texture.SetPixels32(pixels);
-        texture.Apply(true);
-        stampedPin = pin;
+        var disc = new List<int>();
+        var rim = new List<int>();
+        for (int k = 0; k < n; k++)
+        {
+            int k2 = (k + 1) % n;
+            disc.Add(0); disc.Add(1 + k2); disc.Add(1 + k);
+            Quad(rim, 1 + k, 1 + k2, 1 + n + k, 1 + n + k2);
+        }
+
+        if (cupMesh == null) cupMesh = new Mesh { name = "Cup", hideFlags = HideFlags.DontSave };
+        cupMesh.Clear();
+        cupMesh.SetVertices(vertices);
+        cupMesh.subMeshCount = 2;
+        cupMesh.SetTriangles(disc, 0);
+        cupMesh.SetTriangles(rim, 1);
+        cupMesh.RecalculateNormals();
+        cupMesh.RecalculateBounds();
+        cup.GetComponent<MeshFilter>().sharedMesh = cupMesh;
+        cup.GetComponent<MeshRenderer>().sharedMaterials = new[] { cupInstance, rimInstance };
     }
 
     // 0 = flat ... 1 = steepest slope a ball can stop on (and beyond).

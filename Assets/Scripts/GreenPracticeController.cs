@@ -5,7 +5,7 @@ using UnityEngine.InputSystem;
 /// <summary>
 /// Desktop practice on the built-in greens (FamousGreens). Keys:
 ///   Enter = putt (then A / D aim, Space, Space)   N = next putt   R = random ball spot
-///   G / B = next / previous green   H = slope colours   L = ideal line   I = watch the ideal putt
+///   G / B = next / previous green   H = contours / slope colours   L = ideal line   I = watch the ideal putt
 /// Shows an on-screen panel (IMGUI), so it needs no UI setup in the scene.
 /// </summary>
 public class GreenPracticeController : MonoBehaviour
@@ -138,7 +138,10 @@ public class GreenPracticeController : MonoBehaviour
 
     public void ToggleSlopeColours()
     {
-        green.showSlopeColours = !green.showSlopeColours;
+        // Clean -> contour lines -> contour lines + slope colours -> clean
+        if (!green.showContours) green.showContours = true;
+        else if (!green.showSlopeColours) green.showSlopeColours = true;
+        else green.showContours = green.showSlopeColours = false;
         int pin = green.pin;
         green.Rebuild();
         green.SetPin(pin);
@@ -218,39 +221,56 @@ public class GreenPracticeController : MonoBehaviour
     void OnGUI()
     {
         if (green == null || green.Model == null) return;
-        float scale = Mathf.Max(1f, Screen.height / 900f);
-        GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-        float w = 430f;
 
-        var box = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, wordWrap = true, fontSize = 13, richText = true };
-        var label = new GUIStyle(GUI.skin.label) { wordWrap = true, fontSize = 13, richText = true };
+        // Size from the screen height, so the panel fits small Game views and big screens.
+        float scale = Mathf.Clamp(Screen.height / 900f, 0.65f, 2.5f);
+        int font = Mathf.RoundToInt(13f * scale);
+        float margin = 8f * scale;
+        float w = Mathf.Min(440f * scale, Screen.width - 2f * margin);
+
+        var box = new GUIStyle(GUI.skin.box)
+        {
+            alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true, fontSize = font,
+            padding = new RectOffset((int)(8 * scale), (int)(8 * scale), (int)(6 * scale), (int)(6 * scale)),
+        };
 
         Vector2 b = Floor(ball.transform.position), h = Floor(hole.position);
         float distance = (h - b).magnitude;
         float rise = (green.Surface.HeightAt(h) - green.Surface.HeightAt(b)) * 100f;
         float slopeHere = green.Surface.SlopeAt(b).magnitude * 100f;
 
-        string text =
-            $"<b>{Def.name}</b>   stimp {Def.stimpFeet:F1}   ({greenIndex + 1}/{FamousGreens.All.Count})\n" +
-            $"<i>{Def.description}</i>\n\n" +
+        string head = $"<b>{Def.name}</b>   stimp {Def.stimpFeet:F1}   ({greenIndex + 1}/{FamousGreens.All.Count})\n";
+        string body =
             $"<b>{status}</b>\n" +
-            $"Hole: {Def.pins[green.pin].name}   distance {distance:F1} m   " +
-            $"{(rise >= 0f ? "uphill" : "downhill")} {Mathf.Abs(rise):F0} cm   slope at ball {slopeHere:F1} %\n";
+            $"{Def.pins[green.pin].name} hole: {distance:F1} m, {(rise >= 0f ? "uphill" : "downhill")} {Mathf.Abs(rise):F0} cm. " +
+            $"Slope at ball {slopeHere:F1} %";
         if (idealValid)
-            text += $"Ideal: aim {Mathf.Abs(ideal.AimOffsetDegrees(b, h)):F1}° {(ideal.AimOffsetDegrees(b, h) >= 0f ? "right" : "left")}, " +
-                    $"launch {ideal.Speed:F2} m/s\n";
-        if (!string.IsNullOrEmpty(result)) text += $"\n<b>{result}</b>\n";
+        {
+            float aim = ideal.AimOffsetDegrees(b, h);
+            body += $"\nIdeal: aim {Mathf.Abs(aim):F1}° {(aim >= 0f ? "right" : "left")}, launch {ideal.Speed:F2} m/s";
+        }
+        if (!string.IsNullOrEmpty(result)) body += $"\n<b>{result}</b>";
 
-        float height = box.CalcHeight(new GUIContent(text), w) + 10f;
-        GUI.Box(new Rect(10, 10, w, height), text, box);
+        // Leave out the description if the panel would cover too much of the view.
+        string text = head + $"<i>{Def.description}</i>\n" + body;
+        float height = box.CalcHeight(new GUIContent(text), w);
+        if (height > Screen.height * 0.45f)
+        {
+            text = head + body;
+            height = box.CalcHeight(new GUIContent(text), w);
+        }
+        GUI.Box(new Rect(margin, margin, w, height), text, box);
 
+        float y = margin * 2f + height;
         if (launcher.CurrentPhase == AimPowerLauncher.Phase.Power)
         {
             float speed = launcher.GaugeValue * launcher.maxLaunchSpeed;
-            GUI.Box(new Rect(10, 20 + height, w, 28), "");
-            GUI.Box(new Rect(12, 22 + height, (w - 4) * launcher.GaugeValue, 24), "");
-            GUI.Label(new Rect(18, 24 + height, w, 24),
-                $"<b>Power {launcher.GaugeValue * 100f:F0}   ({speed:F2} m/s, rolls ~{RollSimulator.StopDistance(speed, ball.ActiveSettings):F1} m on flat)</b>",
+            float barH = 26f * scale;
+            GUI.Box(new Rect(margin, y, w, barH), "");
+            GUI.Box(new Rect(margin + 2f, y + 2f, (w - 4f) * launcher.GaugeValue, barH - 4f), "");
+            var label = new GUIStyle(GUI.skin.label) { richText = true, fontSize = font, alignment = TextAnchor.MiddleLeft };
+            GUI.Label(new Rect(margin + 8f, y, w, barH),
+                $"<b>Power {launcher.GaugeValue * 100f:F0}   {speed:F2} m/s, rolls ~{RollSimulator.StopDistance(speed, ball.ActiveSettings):F1} m on flat</b>",
                 label);
         }
 
@@ -259,9 +279,11 @@ public class GreenPracticeController : MonoBehaviour
             AimPowerLauncher.Phase.Aiming => "A / D: aim (Shift = fine)   Space: confirm   Esc: cancel",
             AimPowerLauncher.Phase.Power => "Space: hit   Esc: cancel",
             _ => "Enter: putt   N: next putt   R: random spot   G / B: next / previous green\n" +
-                 "H: slope colours   L: ideal line   I: watch the ideal putt",
+                 "H: contours / slope colours   L: ideal line   I: watch the ideal putt",
         };
-        GUI.Box(new Rect(10, Screen.height / scale - 60, 520, 50), help, box);
+        float helpW = Mathf.Min(560f * scale, Screen.width - 2f * margin);
+        float helpH = box.CalcHeight(new GUIContent(help), helpW);
+        GUI.Box(new Rect(margin, Screen.height - margin - helpH, helpW, helpH), help, box);
     }
 
     static Vector2 Floor(Vector3 v) => new Vector2(v.x, v.z);
