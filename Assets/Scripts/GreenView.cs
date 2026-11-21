@@ -515,7 +515,7 @@ public class GreenView : MonoBehaviour
         return line;
     }
 
-    Vector3 LinePoint(Vector2 world) => new Vector3(world.x, VisualHeightAt(world) + 0.006f, world.y);
+    Vector3 LinePoint(Vector2 world) => new Vector3(world.x, VisualHeightAt(world) + 0.012f, world.y);
 
     T GetOrAdd<T>() where T : Component
     {

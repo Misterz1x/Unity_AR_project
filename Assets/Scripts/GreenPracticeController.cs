@@ -70,6 +70,39 @@ public class GreenPracticeController : MonoBehaviour
         else if (kb.iKey.wasPressedThisFrame) PlayIdealPutt();
     }
 
+    // AimPowerLauncher lays the arrow flat at the ball. On a sloped green that puts it under the grass,
+    // so after it has moved the arrow, tilt it along the green and lift it over any bump under it.
+    void LateUpdate() => FitArrowToGreen();
+
+    const float ArrowReach = 1.15f;   // length of the aim arrow from the ball (m)
+    const float ArrowClearance = 0.008f;
+
+    void FitArrowToGreen()
+    {
+        Transform arrow = launcher != null ? launcher.arrow : null;
+        if (arrow == null || !arrow.gameObject.activeSelf || green == null || green.Model == null)
+            return;
+
+        Vector3 aim = launcher.AimDirection;
+        Vector2 dir = new Vector2(aim.x, aim.z);
+        if (dir.sqrMagnitude < 1e-6f) return;
+        dir.Normalize();
+
+        Vector2 start = Floor(ball.transform.position);
+        float h0 = green.VisualHeightAt(start);
+        float h1 = green.VisualHeightAt(start + dir * ArrowReach);
+        float lift = ArrowClearance;
+        for (int i = 1; i < 10; i++)
+        {
+            float t = i / 10f;
+            float surface = green.VisualHeightAt(start + dir * (ArrowReach * t));
+            lift = Mathf.Max(lift, surface - Mathf.Lerp(h0, h1, t) + ArrowClearance);
+        }
+
+        var forward = new Vector3(dir.x * ArrowReach, h1 - h0, dir.y * ArrowReach);
+        arrow.SetPositionAndRotation(new Vector3(start.x, h0 + lift, start.y), Quaternion.LookRotation(forward, Vector3.up));
+    }
+
     // ------------------------------------------------------------------ actions
 
     public void LoadGreen(int index)
