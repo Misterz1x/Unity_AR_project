@@ -78,7 +78,7 @@ namespace ARGolf.Putting
                 {
                     // The aim search steers the ball through the hole centre, so a ball that is not holed
                     // either arrived too fast (lip-out) or never got there (too slow; SpeedAtHole small or NaN).
-                    tooSlow = !(r.SpeedAtHole > s.maxCaptureSpeed);
+                    tooSlow = !(r.LippedOut || r.SpeedAtHole > s.maxCaptureSpeed);
                 }
 
                 if (tooSlow) vLo = v; else vHi = v;

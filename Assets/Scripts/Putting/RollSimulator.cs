@@ -8,13 +8,17 @@ namespace ARGolf.Putting
     {
         public readonly float Time;
         public readonly Vector2 Position;
+        /// <summary>Horizontal speed (m/s).</summary>
         public readonly float Speed;
+        /// <summary>How far the ball centre is below its rolling height (m): 0 on the grass, up to the cup depth in the hole.</summary>
+        public readonly float Depth;
 
-        public PathPoint(float time, Vector2 position, float speed)
+        public PathPoint(float time, Vector2 position, float speed, float depth = 0f)
         {
             Time = time;
             Position = position;
             Speed = speed;
+            Depth = depth;
         }
     }
 
@@ -22,6 +26,8 @@ namespace ARGolf.Putting
     public sealed class RollResult
     {
         public bool Holed { get; internal set; }
+        /// <summary>The ball ran over the hole too fast and came out again (lip-out or hop).</summary>
+        public bool LippedOut { get; internal set; }
         /// <summary>False if the ball was still rolling at the distance or time cap.</summary>
         public bool Stopped { get; internal set; }
         public Vector2 Start { get; internal set; }
@@ -52,6 +58,23 @@ namespace ARGolf.Putting
 
         public float EndDistanceToHole => (End - Hole).magnitude;
 
+        /// <summary>How far the ball is below its rolling height at time t (m): dips and drops at the hole.</summary>
+        public float DepthAt(float t)
+        {
+            if (Path == null || Path.Count == 0) return 0f;
+            if (t <= Path[0].Time) return Path[0].Depth;
+            if (t >= Path[Path.Count - 1].Time) return Path[Path.Count - 1].Depth;
+            int lo = 0, hi = Path.Count - 1;
+            while (hi - lo > 1)
+            {
+                int mid = (lo + hi) / 2;
+                if (Path[mid].Time <= t) lo = mid; else hi = mid;
+            }
+            PathPoint a = Path[lo], b = Path[hi];
+            float span = b.Time - a.Time;
+            return span > 0f ? Mathf.Lerp(a.Depth, b.Depth, (t - a.Time) / span) : b.Depth;
+        }
+
         /// <summary>Ball position at time t after launch (clamped to the start and end of the roll).</summary>
         public Vector2 PositionAt(float t)
         {
@@ -73,7 +96,7 @@ namespace ARGolf.Putting
         public override string ToString() =>
             Holed
                 ? $"HOLED. Launch {LaunchSpeed:F2} m/s, {SpeedAtHole:F2} m/s at the hole"
-                : $"Missed: {Mathf.Abs(LongShort) * 100f:F0} cm {(LongShort >= 0f ? "long" : "short")}, " +
+                : (LippedOut ? "Lip-out! " : "") + $"Missed:  {Mathf.Abs(LongShort) * 100f:F0} cm {(LongShort >= 0f ? "long" : "short")}, " +
                   $"{Mathf.Abs(LateralOffset) * 100f:F0} cm {(LateralOffset >= 0f ? "right" : "left")}. " +
                   $"Launch {LaunchSpeed:F2} m/s, rolled {Distance:F2} m";
     }
@@ -83,13 +106,17 @@ namespace ARGolf.Putting
     ///   a = -mu k g v̂ - (5/7) g ∇h      ∇h = slope of the green (small-slope approximation, fine up to ~8 %)
     ///                                    k = friction scale of the grass (1 on the green, more on the fringe)
     /// A ball at rest stays still while (5/7)|∇h| ≤ mu k, otherwise it starts rolling downhill.
-    /// Holed rule: the ball centre enters the hole circle at ≤ maxCaptureSpeed. Faster = lip-out, it rolls on.
+    /// Hole: when the ball centre enters the hole circle it drops if its speed is at most
+    ///   maxCaptureSpeed × chord / hole diameter   (it must fall far enough while crossing the hole),
+    /// so the capture speed is highest over the centre and falls towards the edge. Faster = it runs over:
+    /// over the centre it hops the hole, off-centre it lips out (loses speed, turned away from the hole).
+    /// A captured ball falls into the cup, hits the back wall and settles on the bottom (Path depth).
     /// </summary>
     public static class RollSimulator
     {
         const float RestSpeed = 1e-4f;
-        /// <summary>Speed used to animate the last bit from the hole edge to the hole centre (m/s).</summary>
-        const float MinDropSpeed = 0.3f;
+        /// <summary>Largest turn of a lip-out (degrees), for a ball just a little too fast at mid offset.</summary>
+        const float MaxLipTurn = 110f;
 
         /// <summary>Distance (m) a ball launched at v0 rolls on a flat green.</summary>
         public static float StopDistance(float v0, RollSettings s) =>
@@ -159,28 +186,55 @@ namespace ARGolf.Putting
                 if (!insideHole && SegmentEntersCircle(p, next, hole, r, out float u))
                 {
                     Vector2 entry = Vector2.Lerp(p, next, u);
-                    float entrySpeed = (v + a * (u * h)).magnitude;
+                    Vector2 vEntry = v + a * (u * h);
+                    float entrySpeed = vEntry.magnitude;
                     speedAtHole = entrySpeed;
-                    if (entrySpeed <= s.maxCaptureSpeed)
+                    distance += (entry - p).magnitude;
+                    t += u * h;
+                    path.Add(new PathPoint(t, entry, entrySpeed));
+                    closest = Mathf.Min(closest, r);
+
+                    Vector2 dir = entrySpeed > 1e-6f ? vEntry / entrySpeed : (hole - entry).normalized;
+                    Vector2 toCentre = hole - entry;
+                    float halfChord = Mathf.Max(0f, Vector2.Dot(toCentre, dir));
+                    float offset = Mathf.Sqrt(Mathf.Max(0f, toCentre.sqrMagnitude - halfChord * halfChord));
+                    float capture = s.maxCaptureSpeed * halfChord / r; // chord / diameter
+
+                    if (entrySpeed <= capture)
                     {
                         holed = true;
                         stopped = true;
-                        distance += (entry - p).magnitude;
-                        t += u * h;
-                        path.Add(new PathPoint(t, entry, entrySpeed));
-
-                        // Drop: finish at the hole centre.
-                        float toCentre = (hole - entry).magnitude;
-                        distance += toCentre;
-                        t += toCentre / Mathf.Max(entrySpeed, MinDropSpeed);
-                        p = hole;
-                        path.Add(new PathPoint(t, p, 0f));
                         closest = 0f;
                         closestPoint = hole;
+                        p = DropIntoCup(entry, vEntry, hole, s, path, ref t, ref distance);
                         break;
                     }
+
+                    // Too fast: runs over the hole, dipping a little, and comes out on the far side.
                     lippedOut = true;
                     insideHole = true;
+                    float chord = 2f * halfChord;
+                    float cross = chord / Mathf.Max(entrySpeed, 1e-3f);
+                    float dip = Mathf.Min(0.5f * s.gravity * cross * cross, s.BallRadius);
+                    Vector2 exit = entry + dir * chord;
+                    path.Add(new PathPoint(t + 0.5f * cross, entry + dir * halfChord, entrySpeed, dip));
+
+                    // Off-centre balls catch the lip and turn away from the hole; centred ones hit the back and hop.
+                    float frac = Mathf.Clamp01(offset / r);
+                    float turn = MaxLipTurn * frac * Mathf.Clamp01(capture / entrySpeed);
+                    float side = dir.x * toCentre.y - dir.y * toCentre.x; // > 0: hole centre is left of the ball's path
+                    Vector2 outDir = GreenMath.Rotate(dir, side >= 0f ? turn : -turn); // turn away from the centre
+                    Vector2 outward = (exit - hole).normalized;
+                    if (Vector2.Dot(outDir, outward) < 0.1f)
+                        outDir = (outDir - Vector2.Dot(outDir, outward) * outward + 0.1f * outward).normalized;
+                    float outSpeed = entrySpeed * (0.55f + 0.35f * frac);
+
+                    t += cross;
+                    distance += chord;
+                    p = exit;
+                    v = outDir * outSpeed;
+                    path.Add(new PathPoint(t, p, outSpeed));
+                    continue;
                 }
                 else if (insideHole && (next - hole).sqrMagnitude > r * r)
                 {
@@ -198,6 +252,7 @@ namespace ARGolf.Putting
 
             if (!holed && !lippedOut)
                 speedAtHole = closestSpeed > 1e-3f ? closestSpeed : float.NaN;
+            if (holed) lippedOut = false;
 
             Vector2 toHole = hole - start;
             Vector2 line = toHole.sqrMagnitude > 0f ? toHole.normalized
@@ -208,6 +263,7 @@ namespace ARGolf.Putting
             return new RollResult
             {
                 Holed = holed,
+                LippedOut = lippedOut,
                 Stopped = stopped,
                 Start = start,
                 Direction = launch.Direction,
@@ -223,6 +279,55 @@ namespace ARGolf.Putting
                 LongShort = holed ? 0f : Vector2.Dot(miss, line),
                 Path = path,
             };
+        }
+
+        // The ball falls into the cup: keeps its speed across, falls with gravity, bounces off the cup wall
+        // (once its centre is below the rim) and the bottom, and settles. Adds path points with depth.
+        static Vector2 DropIntoCup(Vector2 entry, Vector2 velocity, Vector2 hole, RollSettings s,
+            List<PathPoint> path, ref float t, ref float distance)
+        {
+            const float dt = 1f / 480f, wallRestitution = 0.3f, bottomRestitution = 0.25f, maxTime = 2f;
+            float wall = Mathf.Max(0.001f, s.HoleRadius - s.BallRadius);
+            Vector2 pos = entry, hv = velocity;
+            float depth = 0f, vz = 0f, elapsed = 0f, sinceSample = 0f;
+
+            while (elapsed < maxTime)
+            {
+                vz += s.gravity * dt;
+                depth += vz * dt;
+                if (depth >= s.cupDepth)
+                {
+                    depth = s.cupDepth;
+                    vz = Mathf.Abs(vz) > 0.25f ? -vz * bottomRestitution : 0f;
+                    hv *= 0.6f; // rolling on the cup bottom
+                }
+
+                Vector2 before = pos;
+                pos += hv * dt;
+                // Below the rim the ball is inside the cup: keep its centre off the wall.
+                Vector2 fromCentre = pos - hole;
+                if (depth > 0.3f * s.BallRadius && fromCentre.magnitude > wall)
+                {
+                    Vector2 n = fromCentre.normalized;
+                    pos = hole + n * wall;
+                    float radial = Vector2.Dot(hv, n);
+                    if (radial > 0f) hv -= (1f + wallRestitution) * radial * n;
+                }
+                hv *= 1f - 1.5f * dt;
+                distance += (pos - before).magnitude;
+                elapsed += dt;
+                sinceSample += dt;
+
+                bool settled = depth >= s.cupDepth && vz == 0f && hv.magnitude < 0.01f;
+                if (sinceSample >= 1f / 120f || settled)
+                {
+                    path.Add(new PathPoint(t + elapsed, pos, hv.magnitude, depth));
+                    sinceSample = 0f;
+                }
+                if (settled) break;
+            }
+            t += elapsed;
+            return pos;
         }
 
         // First u in [0, 1] where the segment a→b is inside the circle (centre c, radius r), entering from outside.

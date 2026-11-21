@@ -31,8 +31,12 @@ namespace ARGolf.Putting
         [Tooltip("Ball diameter in metres (regulation 42.7 mm).")]
         public float ballDiameter = 0.0427f;
 
-        [Tooltip("Fastest speed (m/s) at which the ball still drops. 1.0 = would roll ~3 ft past at stimp 10.")]
-        public float maxCaptureSpeed = 1.0f;
+        [Tooltip("Fastest speed (m/s) at which a ball rolling over the hole centre still drops. Off-centre it is " +
+                 "lower, in proportion to the chord the ball crosses. Published estimates: ~1.3-1.6 m/s.")]
+        public float maxCaptureSpeed = 1.3f;
+
+        [Tooltip("Cup depth (m). Regulation: at least 4 in = 0.1016 m.")]
+        public float cupDepth = 0.1016f;
 
         [Tooltip("Physics time step (s). 1/240 moves a 2 m/s ball 8 mm per step.")]
         public float timeStep = 1f / 240f;

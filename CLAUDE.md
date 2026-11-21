@@ -28,7 +28,9 @@ at rest: stays while (5/7)*|grad(h)| <= mu, else rolls downhill
 ```
 - Default stimp 10 ft -> mu ≈ 0.056; a ball at rest holds on slopes up to ~7.8 %. Tunable in `RollSettings`.
 - Small-slope approximation; fine for greens (< ~8 %). Slopes in UI and data: percent.
-- Holed rule: ball centre enters the hole circle at ≤ 1.0 m/s (≈ "would roll 3 ft past" at stimp 10). Faster = lip-out, ball rolls on.
+- Hole: when the ball centre enters the hole circle it drops if speed ≤ maxCaptureSpeed × chord / diameter
+  (1.3 m/s over the centre, less towards the edge; published estimates 1.3–1.6 m/s). Faster: centred = hops the hole,
+  off-centre = lip-out (turned away from the hole, loses speed). Captured balls drop into the cup (Path depth).
 - Hole Ø 108 mm, ball Ø 42.7 mm.
 - Sanity check (stimp 10, 2 % side slope): 3 m putt aims ~27 cm uphill, 6 m ~63 cm.
 

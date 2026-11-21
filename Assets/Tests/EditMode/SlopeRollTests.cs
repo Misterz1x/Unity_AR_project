@@ -152,6 +152,48 @@ namespace ARGolf.Putting.Tests
             Assert.That(r.Duration, Is.LessThan(s.maxRollTime));
         }
 
+        static Vector2 Origin2 => Vector2.zero;
+
+        // Ball rolling along +Z towards a hole at (offset, 2): offset = how far the hole centre is right of the line.
+        RollResult PuttPastHole(float speedAtHole, float offset)
+        {
+            float v0 = Mathf.Sqrt(speedAtHole * speedAtHole + 2f * s.FrictionDeceleration * 2f);
+            return RollSimulator.Simulate(new LaunchResult(v0, Forward, 0.0), Origin2, new Vector2(offset, 2f), s);
+        }
+
+        [Test]
+        public void CaptureSpeed_IsHighestOverTheCentre()
+        {
+            Assert.IsTrue(PuttPastHole(1.2f, 0f).Holed, "1.2 m/s over the centre drops");
+            Assert.IsFalse(PuttPastHole(1.2f, 0.7f * s.HoleRadius).Holed, "1.2 m/s near the edge does not");
+            Assert.IsTrue(PuttPastHole(0.6f, 0.7f * s.HoleRadius).Holed, "slowly it drops near the edge too");
+            Assert.IsFalse(PuttPastHole(1.5f, 0f).Holed, "too fast even over the centre");
+        }
+
+        [Test]
+        public void LipOut_TurnsTheBallAwayFromTheHole()
+        {
+            // Hole centre 3 cm right of the line: the ball passes on the left side of the cup and is turned left.
+            var r = PuttPastHole(1.2f, 0.03f); // capture there: 1.3 × chord / diameter ≈ 1.08 m/s
+
+            Assert.IsFalse(r.Holed);
+            Assert.IsTrue(r.LippedOut);
+            Assert.That(r.End.x, Is.LessThan(-0.05f));
+            Assert.That(r.End.y, Is.GreaterThan(2f));
+        }
+
+        [Test]
+        public void HoledBall_SettlesOnTheCupBottom()
+        {
+            var r = PuttPastHole(0.8f, 0.02f);
+
+            Assert.IsTrue(r.Holed);
+            PathPoint last = r.Path[r.Path.Count - 1];
+            Assert.That(last.Depth, Is.EqualTo(s.cupDepth).Within(1e-5f));
+            Assert.That((last.Position - r.Hole).magnitude, Is.LessThanOrEqualTo(s.HoleRadius - s.BallRadius + 1e-4f));
+            Assert.That(r.DepthAt(r.Duration), Is.EqualTo(s.cupDepth).Within(1e-5f));
+        }
+
         [Test]
         public void FastPuttThatLipsOut_CanStillBreakBackAndStop()
         {

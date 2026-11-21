@@ -8,7 +8,8 @@ using UnityEngine;
 /// Builds the mesh and texture in code, at runtime and in the Editor (so it also works when the
 /// green is placed in AR). The object's position is the green centre, its Y rotation turns the green.
 /// Texture: grass with mowing stripes; optional slope colours (green = flat ... red = too steep to stop on)
-/// and contour lines every few cm of height. The active hole is a small disc mesh on the surface.
+/// and contour lines every few cm of height. The active hole is cut out of the green (texture alpha +
+/// alpha clipping) with a cup below it: soil, white liner and bottom.
 /// </summary>
 [ExecuteAlways]
 public class GreenView : MonoBehaviour
@@ -73,9 +74,10 @@ public class GreenView : MonoBehaviour
     Texture2D texture;
     Material greenInstance, fringeInstance, roughInstance;
     float groundLevel; // local height the rough apron blends down to
+    Color32[] basePixels; // green texture without the hole cut
     GameObject cup;
     Mesh cupMesh;
-    Material cupInstance, rimInstance;
+    Material soilInstance, linerInstance, bottomInstance, rimInstance;
     LineRenderer idealLine, pathLine;
     bool dirty = true;
     Vector3 builtPosition;
@@ -95,6 +97,7 @@ public class GreenView : MonoBehaviour
         pin = pinIndex;
         if (Model == null) return;
         pin = Mathf.Clamp(pin, 0, Mathf.Max(0, Model.Definition.pins.Count - 1));
+        StampHole();
         UpdateCup();
     }
 
@@ -214,12 +217,16 @@ public class GreenView : MonoBehaviour
         Release(fringeInstance);
         Release(roughInstance);
         Release(cupMesh);
-        Release(cupInstance);
+        Release(soilInstance);
+        Release(linerInstance);
+        Release(bottomInstance);
         Release(rimInstance);
         mesh = null;
         texture = null;
         cupMesh = null;
-        greenInstance = fringeInstance = roughInstance = cupInstance = rimInstance = null;
+        basePixels = null;
+        greenInstance = fringeInstance = roughInstance = null;
+        soilInstance = linerInstance = bottomInstance = rimInstance = null;
     }
 
     // ------------------------------------------------------------------ building
@@ -245,6 +252,7 @@ public class GreenView : MonoBehaviour
         Release(fringeInstance);
         Release(roughInstance);
         greenInstance = MakeMaterial(greenMaterial, Color.white);
+        EnableAlphaClip(greenInstance);
         fringeInstance = MakeMaterial(fringeMaterial, FringeGrass);
         roughInstance = MakeMaterial(roughMaterial, RoughGrass);
         TextureFrame(Model, out _, out float frame);
@@ -463,8 +471,8 @@ public class GreenView : MonoBehaviour
                 pixels[x + y * res] = c;
             }
         }
-        texture.SetPixels32(pixels);
-        texture.Apply(true);
+        basePixels = pixels;
+        StampHole();
 
         if (greenInstance != null)
         {
@@ -483,8 +491,40 @@ public class GreenView : MonoBehaviour
         return Mathf.Lerp(Mathf.Lerp(a[k], a[k + 1], fu), Mathf.Lerp(a[k + n], a[k + n + 1], fu), fv);
     }
 
-    // The active hole: a dark disc with a light rim, as a small mesh that follows the green's surface,
-    // so it stays round and sharp at any distance.
+    // Cuts the active hole out of the green texture (alpha 0; the green material clips it).
+    void StampHole()
+    {
+        if (Model == null || texture == null || basePixels == null) return;
+        TextureFrame(Model, out Vector2 min, out float size);
+        int res = texture.width;
+        float texel = size / res;
+        var pixels = (Color32[])basePixels.Clone();
+        Vector2 hole = Model.PinPosition(pin);
+        float r = Model.MakeRollSettings().HoleRadius;
+
+        int cx = Mathf.FloorToInt((hole.x - min.x) / texel), cy = Mathf.FloorToInt((hole.y - min.y) / texel);
+        int reach = Mathf.CeilToInt(r / texel) + 2;
+        for (int y = Mathf.Max(0, cy - reach); y <= Mathf.Min(res - 1, cy + reach); y++)
+            for (int x = Mathf.Max(0, cx - reach); x <= Mathf.Min(res - 1, cx + reach); x++)
+            {
+                Vector2 p = min + new Vector2((x + 0.5f) * texel, (y + 0.5f) * texel);
+                if ((p - hole).magnitude < r - 0.25f * texel)
+                    pixels[x + y * res].a = 0;
+            }
+        texture.SetPixels32(pixels);
+        texture.Apply(true);
+    }
+
+    static void EnableAlphaClip(Material m)
+    {
+        if (m == null) return;
+        if (m.HasProperty("_AlphaClip")) m.SetFloat("_AlphaClip", 1f);
+        if (m.HasProperty("_Cutoff")) m.SetFloat("_Cutoff", 0.5f);
+        m.EnableKeyword("_ALPHATEST_ON");
+    }
+
+    // The cup under the active hole: a thin cut edge on the surface, soil wall (top 2.5 cm), white liner,
+    // and the bottom. Walls face inwards. Follows the green's surface at the rim.
     void UpdateCup()
     {
         if (Model == null) return;
@@ -497,54 +537,82 @@ public class GreenView : MonoBehaviour
             cup.transform.localPosition = Vector3.zero;
             cup.transform.localRotation = Quaternion.identity;
             if (cup.GetComponent<MeshFilter>() == null) cup.AddComponent<MeshFilter>();
-            var r = cup.GetComponent<MeshRenderer>();
-            if (r == null) r = cup.AddComponent<MeshRenderer>();
-            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            if (cup.GetComponent<MeshRenderer>() == null) cup.AddComponent<MeshRenderer>();
         }
-        if (cupInstance == null)
+        if (soilInstance == null)
         {
-            cupInstance = MakeMaterial(null, new Color(0.04f, 0.04f, 0.04f));
-            rimInstance = MakeMaterial(null, new Color(0.85f, 0.85f, 0.82f));
+            soilInstance = MakeMaterial(null, new Color(0.27f, 0.2f, 0.13f));
+            linerInstance = MakeMaterial(null, new Color(0.93f, 0.93f, 0.9f));
+            bottomInstance = MakeMaterial(null, new Color(0.2f, 0.16f, 0.11f));
+            rimInstance = MakeMaterial(null, new Color(0.22f, 0.3f, 0.12f));
         }
 
+        RollSettings rules = Model.MakeRollSettings();
         Vector2 hole = Model.PinPosition(pin);
-        float r0 = Model.MakeRollSettings().HoleRadius, r1 = r0 + 0.004f;
+        float r = rules.HoleRadius;
         const int n = 48;
-        const float lift = 0.0015f;
+        const float soilBand = 0.025f, rimWidth = 0.004f, lift = 0.0008f;
+        float centreY = visualHeightScale * Model.HeightAt(hole);
+        float bottomY = centreY - rules.cupDepth;
+
         var vertices = new List<Vector3>();
-        Vector3 Point(Vector2 local) => new Vector3(local.x, visualHeightScale * Model.HeightAt(local) + lift, local.y);
-
-        vertices.Add(Point(hole));
-        for (int k = 0; k < n; k++)
+        float Surface(Vector2 local) => visualHeightScale * Model.HeightAt(local);
+        Vector2 Around(int k, float radius)
         {
             float a = 2f * Mathf.PI * k / n;
-            vertices.Add(Point(hole + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r0));
+            return hole + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * radius;
         }
-        for (int k = 0; k < n; k++)
+        int Ring(System.Func<int, Vector3> point)
         {
-            float a = 2f * Mathf.PI * k / n;
-            vertices.Add(Point(hole + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r1));
+            int start = vertices.Count;
+            for (int k = 0; k < n; k++) vertices.Add(point(k));
+            return start;
         }
 
-        var disc = new List<int>();
+        // Rim: thin dark ring on the surface hiding the pixel edge of the cut.
+        int rimIn = Ring(k => { Vector2 p = Around(k, r - 0.002f); return new Vector3(p.x, Surface(p) + lift, p.y); });
+        int rimOut = Ring(k => { Vector2 p = Around(k, r + rimWidth); return new Vector3(p.x, Surface(p) + lift, p.y); });
+        // Wall rings.
+        int top = Ring(k => { Vector2 p = Around(k, r); return new Vector3(p.x, Surface(p), p.y); });
+        int band = Ring(k => { Vector2 p = Around(k, r); return new Vector3(p.x, Surface(p) - soilBand, p.y); });
+        int bandL = Ring(k => vertices[band + k]); // own vertices for the liner (sharp colour edge)
+        int low = Ring(k => { Vector2 p = Around(k, r); return new Vector3(p.x, bottomY, p.y); });
+        int bottomRing = Ring(k => vertices[low + k]);
+        int centre = vertices.Count;
+        vertices.Add(new Vector3(hole.x, bottomY, hole.y));
+
         var rim = new List<int>();
+        var soil = new List<int>();
+        var liner = new List<int>();
+        var bottom = new List<int>();
         for (int k = 0; k < n; k++)
         {
             int k2 = (k + 1) % n;
-            disc.Add(0); disc.Add(1 + k2); disc.Add(1 + k);
-            Quad(rim, 1 + k, 1 + k2, 1 + n + k, 1 + n + k2);
+            Quad(rim, rimIn + k, rimIn + k2, rimOut + k, rimOut + k2);   // facing up
+            QuadInward(soil, top + k, top + k2, band + k, band + k2);
+            QuadInward(liner, bandL + k, bandL + k2, low + k, low + k2);
+            bottom.Add(centre); bottom.Add(bottomRing + k2); bottom.Add(bottomRing + k); // facing up
         }
 
         if (cupMesh == null) cupMesh = new Mesh { name = "Cup", hideFlags = HideFlags.DontSave };
         cupMesh.Clear();
         cupMesh.SetVertices(vertices);
-        cupMesh.subMeshCount = 2;
-        cupMesh.SetTriangles(disc, 0);
-        cupMesh.SetTriangles(rim, 1);
+        cupMesh.subMeshCount = 4;
+        cupMesh.SetTriangles(rim, 0);
+        cupMesh.SetTriangles(soil, 1);
+        cupMesh.SetTriangles(liner, 2);
+        cupMesh.SetTriangles(bottom, 3);
         cupMesh.RecalculateNormals();
         cupMesh.RecalculateBounds();
         cup.GetComponent<MeshFilter>().sharedMesh = cupMesh;
-        cup.GetComponent<MeshRenderer>().sharedMaterials = new[] { cupInstance, rimInstance };
+        cup.GetComponent<MeshRenderer>().sharedMaterials = new[] { rimInstance, soilInstance, linerInstance, bottomInstance };
+    }
+
+    // Like Quad, but facing the other way (for the inside of the cup wall).
+    static void QuadInward(List<int> t, int a, int b, int c, int d)
+    {
+        t.Add(a); t.Add(c); t.Add(b);
+        t.Add(b); t.Add(c); t.Add(d);
     }
 
     // 0 = flat ... 1 = steepest slope a ball can stop on (and beyond).

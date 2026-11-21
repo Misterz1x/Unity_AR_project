@@ -88,7 +88,8 @@ public class VirtualBall : MonoBehaviour
 
         float t = Time.time - rollStartTime;
         Vector2 p = LastResult.PositionAt(t);
-        float y = green != null ? green.VisualHeightAt(p) + settings.BallRadius - green.SinkAt(p) : rollStart.y;
+        float y = (green != null ? green.VisualHeightAt(p) + settings.BallRadius - green.SinkAt(p) : rollStart.y)
+                  - LastResult.DepthAt(t); // dips over the hole, drops into the cup
         Vector3 next = new Vector3(p.x, y, p.y);
 
         // Spin the ball to match the distance rolled.
@@ -107,7 +108,8 @@ public class VirtualBall : MonoBehaviour
     void Finish()
     {
         IsRolling = false;
-        if (LastResult.Holed)
+        // A holed ball stays visible, lying in the cup (without a green it has nowhere to lie, so hide it).
+        if (LastResult.Holed && green == null)
             SetVisible(false);
         Debug.Log(LastResult.ToString());
         Finished?.Invoke(LastResult);

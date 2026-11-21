@@ -73,7 +73,8 @@ namespace ARGolf.Putting.Tests
 
             Assert.IsTrue(r.Holed);
             Assert.That(r.SpeedAtHole, Is.LessThanOrEqualTo(flat.maxCaptureSpeed));
-            Assert.That((r.End - new Vector2(0f, 2f)).magnitude, Is.LessThan(0.001f));
+            Assert.That(r.EndDistanceToHole, Is.LessThan(flat.HoleRadius - flat.BallRadius + 1e-4f), "rests inside the cup");
+            Assert.That(r.Path[r.Path.Count - 1].Depth, Is.EqualTo(flat.cupDepth).Within(1e-5f), "on the bottom");
         }
 
         [Test]
@@ -86,15 +87,18 @@ namespace ARGolf.Putting.Tests
         }
 
         [Test]
-        public void StraightPutt_TooFast_LipsOutAndIsLong()
+        public void StraightPutt_TooFast_HopsTheHoleAndIsLong()
         {
-            // Would roll 3 m past: ~1.8 m/s at the hole.
+            // Would roll 3 m past: ~1.8 m/s at the hole, over the centre.
             float v0 = RollSimulator.LaunchSpeedForDistance(5f, flat);
             var r = Putt(v0, Forward, new Vector2(0f, 2f), flat);
 
             Assert.IsFalse(r.Holed);
+            Assert.IsTrue(r.LippedOut);
             Assert.That(r.SpeedAtHole, Is.GreaterThan(flat.maxCaptureSpeed));
-            Assert.That(r.LongShort, Is.EqualTo(3f).Within(0.01f));
+            Assert.That(r.LongShort, Is.GreaterThan(0.3f));
+            Assert.That(r.LongShort, Is.LessThan(3f), "hitting the back of the cup costs speed");
+            Assert.That(Mathf.Abs(r.LateralOffset), Is.LessThan(0.01f), "a centred hop goes straight on");
         }
 
         [Test]

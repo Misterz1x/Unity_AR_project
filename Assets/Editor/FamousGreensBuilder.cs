@@ -20,8 +20,13 @@ public static class FamousGreensBuilder
     const string ArrowMeshPath = "Assets/Generated/PuttingGreen/AimArrowMesh.asset";
     const string ArrowMaterialPath = "Assets/Generated/PuttingGreen/AimArrow.mat";
 
-    const float FlagstickDiameter = 0.015f, FlagstickHeight = 1.4f;
-    static readonly Vector3 FlagClothSize = new Vector3(0.45f, 0.3f, 0.005f);
+    const string NatureDir = "Assets/ThirdParty/Kenney Nature Pack/Models";
+    static readonly string[] TreeModels = { "naturePack_051.fbx", "naturePack_164.fbx", "naturePack_059.fbx" };
+    static readonly string[] BushModels = { "naturePack_018.fbx", "naturePack_021.fbx", "naturePack_flat_013.fbx" };
+
+    // Flagstick: 7 ft above the green (regulation-ish), standing on the cup bottom; bands every 30 cm.
+    const float FlagstickDiameter = 0.016f, FlagstickAboveGreen = 2.13f, StickBand = 0.3f;
+    static readonly Vector2 FlagClothSize = new Vector2(0.5f, 0.35f);
 
     [MenuItem("Tools/AR Golf/Build Famous Greens Scene")]
     public static void Build()
@@ -40,8 +45,12 @@ public static class FamousGreensBuilder
         // Grass grain on every grass material (GreenView sets the tiling for the green, fringe and rough apron).
         foreach (var m in new[] { greenMat, fringeMat, roughMat }) WithDetail(m, grassDetail, 1f);
         Material waterMat = LitMaterial("Water", new Color(0.12f, 0.35f, 0.55f), 0.92f);
-        Material stickMat = LitMaterial("Flagstick", new Color(0.95f, 0.95f, 0.95f), 0.5f);
-        Material clothMat = LitMaterial("FlagCloth", new Color(0.9f, 0.15f, 0.12f), 0.1f);
+        EnableAlphaClip(greenMat); // the hole is cut out of the green texture
+        Material stickMat = LitMaterial("Flagstick", Color.white, 0.55f);
+        float stickLength = FlagstickAboveGreen + rules.cupDepth;
+        stickMat.SetTexture("_BaseMap", SaveStripes());
+        stickMat.SetTextureScale("_BaseMap", new Vector2(1f, stickLength / (2f * StickBand)));
+        Material clothMat = LitMaterial("FlagCloth", new Color(0.95f, 0.78f, 0.08f), 0.15f);
         Material ballMat = LitMaterial("GolfBall", Color.white, 0.7f);
         Material lineMat = SpriteMaterial("PathLine");
 
@@ -51,6 +60,10 @@ public static class FamousGreensBuilder
         RenderSettings.ambientSkyColor = new Color(0.72f, 0.8f, 0.92f);
         RenderSettings.ambientEquatorColor = new Color(0.55f, 0.62f, 0.55f);
         RenderSettings.ambientGroundColor = new Color(0.25f, 0.3f, 0.2f);
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Exponential;
+        RenderSettings.fogDensity = 0.006f;
+        RenderSettings.fogColor = new Color(0.74f, 0.81f, 0.88f);
 
         var lightGo = new GameObject("Directional Light");
         lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
@@ -67,7 +80,7 @@ public static class FamousGreensBuilder
         GameObject ground = Primitive(PrimitiveType.Plane, "Ground", null, groundMat);
         ground.transform.localScale = new Vector3(30f, 1f, 30f); // 300 x 300 m
         GameObject water = Primitive(PrimitiveType.Plane, "Water", null, waterMat);
-        water.transform.localScale = new Vector3(10f, 1f, 10f);
+        water.transform.localScale = new Vector3(9f, 1f, 9f); // 90 x 90 m; island trees stand beyond it
         water.SetActive(false);
 
         // Green
@@ -86,7 +99,14 @@ public static class FamousGreensBuilder
         // Hole with flag
         var hole = new GameObject("Hole");
         hole.transform.position = view.PinWorldPosition(firstPutt.pin);
-        BuildFlag(hole.transform, stickMat, clothMat);
+        BuildFlag(hole.transform, stickMat, clothMat, rules.cupDepth);
+
+        // Trees and bushes around the green (re-placed for every green)
+        var scenery = new GameObject("Scenery").AddComponent<GreenScenery>();
+        scenery.trees = LoadModels(TreeModels);
+        scenery.bushes = LoadModels(BushModels);
+        scenery.green = view;
+        scenery.Place();
 
         // Ball
         GameObject ball = Primitive(PrimitiveType.Sphere, "Ball", null, ballMat);
@@ -260,19 +280,71 @@ public static class FamousGreensBuilder
         return go;
     }
 
-    static void BuildFlag(Transform hole, Material stickMat, Material clothMat)
+    // Flagstick standing on the cup bottom, white ball on top, waving cloth.
+    static void BuildFlag(Transform hole, Material stickMat, Material clothMat, float cupDepth)
     {
         var flag = new GameObject("Flag");
         flag.transform.SetParent(hole, false);
+        flag.transform.localPosition = Vector3.down * cupDepth;
+        flag.transform.localRotation = Quaternion.Euler(0f, 35f, 0f); // wind direction
+        float length = FlagstickAboveGreen + cupDepth;
 
         GameObject stick = Primitive(PrimitiveType.Cylinder, "Flagstick", flag.transform, stickMat); // 2 units tall
-        stick.transform.localScale = new Vector3(FlagstickDiameter, FlagstickHeight * 0.5f, FlagstickDiameter);
-        stick.transform.localPosition = Vector3.up * (FlagstickHeight * 0.5f);
+        stick.transform.localScale = new Vector3(FlagstickDiameter, length * 0.5f, FlagstickDiameter);
+        stick.transform.localPosition = Vector3.up * (length * 0.5f);
 
-        GameObject cloth = Primitive(PrimitiveType.Cube, "FlagCloth", flag.transform, clothMat);
-        cloth.transform.localScale = FlagClothSize;
-        cloth.transform.localPosition = new Vector3(-(FlagClothSize.x + FlagstickDiameter) * 0.5f,
-            FlagstickHeight - FlagClothSize.y * 0.5f, 0f);
+        GameObject cap = Primitive(PrimitiveType.Sphere, "Cap", flag.transform, stickMat);
+        cap.transform.localScale = Vector3.one * FlagstickDiameter * 1.6f;
+        cap.transform.localPosition = Vector3.up * length;
+
+        var cloth = new GameObject("FlagCloth");
+        cloth.transform.SetParent(flag.transform, false);
+        cloth.transform.localPosition = new Vector3(-FlagstickDiameter * 0.5f, length - 0.03f, 0f);
+        cloth.AddComponent<MeshFilter>();
+        cloth.AddComponent<MeshRenderer>().sharedMaterial = clothMat;
+        var wave = cloth.AddComponent<FlagWave>();
+        wave.size = FlagClothSize;
+    }
+
+    // Two-row texture (white / red) for the banded flagstick.
+    static Texture2D SaveStripes()
+    {
+        string path = $"{GenDir}/FlagstickBands.png";
+        var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        var white = new Color32(245, 245, 245, 255);
+        var red = new Color32(200, 30, 30, 255);
+        tex.SetPixels32(new[] { white, white, red, red });
+        tex.Apply();
+        File.WriteAllBytes(path, tex.EncodeToPNG());
+        Object.DestroyImmediate(tex);
+        AssetDatabase.ImportAsset(path);
+        var importer = (TextureImporter)AssetImporter.GetAtPath(path);
+        importer.wrapMode = TextureWrapMode.Repeat;
+        importer.filterMode = FilterMode.Point;
+        importer.mipmapEnabled = false;
+        importer.npotScale = TextureImporterNPOTScale.None;
+        importer.SaveAndReimport();
+        return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+    }
+
+    static GameObject[] LoadModels(string[] names)
+    {
+        var list = new System.Collections.Generic.List<GameObject>();
+        foreach (string name in names)
+        {
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>($"{NatureDir}/{name}");
+            if (model != null) list.Add(model);
+            else Debug.LogWarning($"[FamousGreensBuilder] Missing model {NatureDir}/{name}");
+        }
+        return list.ToArray();
+    }
+
+    static void EnableAlphaClip(Material m)
+    {
+        m.SetFloat("_AlphaClip", 1f);
+        m.SetFloat("_Cutoff", 0.5f);
+        m.EnableKeyword("_ALPHATEST_ON");
+        EditorUtility.SetDirty(m);
     }
 
     static GameObject BuildArrow()
