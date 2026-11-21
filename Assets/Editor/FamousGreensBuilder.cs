@@ -91,6 +91,7 @@ public static class FamousGreensBuilder
         // Ball
         GameObject ball = Primitive(PrimitiveType.Sphere, "Ball", null, ballMat);
         ball.transform.localScale = Vector3.one * rules.ballDiameter;
+        ball.GetComponent<MeshFilter>().sharedMesh = SmoothSphere(); // the built-in sphere looks faceted up close
         ball.transform.position = view.SurfacePoint(firstPutt.ball) + Vector3.up * rules.BallRadius;
         var virtualBall = ball.AddComponent<VirtualBall>();
         virtualBall.hole = hole.transform;
@@ -196,6 +197,48 @@ public static class FamousGreensBuilder
         importer.mipmapEnabled = true;
         importer.SaveAndReimport();
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+    }
+
+    // UV sphere, diameter 1 (like the built-in one), 64 x 48 segments.
+    static Mesh SmoothSphere()
+    {
+        string path = $"{GenDir}/BallMesh.asset";
+        var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        if (existing != null) return existing;
+
+        const int lon = 64, lat = 48;
+        var vertices = new System.Collections.Generic.List<Vector3>();
+        var normals = new System.Collections.Generic.List<Vector3>();
+        var uvs = new System.Collections.Generic.List<Vector2>();
+        var tris = new System.Collections.Generic.List<int>();
+        for (int j = 0; j <= lat; j++)
+        {
+            float theta = Mathf.PI * j / lat; // 0 = top
+            for (int i = 0; i <= lon; i++)
+            {
+                float phi = 2f * Mathf.PI * i / lon;
+                var n = new Vector3(Mathf.Sin(theta) * Mathf.Cos(phi), Mathf.Cos(theta), Mathf.Sin(theta) * Mathf.Sin(phi));
+                vertices.Add(n * 0.5f);
+                normals.Add(n);
+                uvs.Add(new Vector2((float)i / lon, 1f - (float)j / lat));
+            }
+        }
+        for (int j = 0; j < lat; j++)
+            for (int i = 0; i < lon; i++)
+            {
+                int a = j * (lon + 1) + i, b = a + lon + 1;
+                tris.Add(a); tris.Add(a + 1); tris.Add(b);
+                tris.Add(a + 1); tris.Add(b + 1); tris.Add(b);
+            }
+        var mesh = new Mesh { name = "Smooth ball" };
+        mesh.SetVertices(vertices);
+        mesh.SetNormals(normals);
+        mesh.SetUVs(0, uvs);
+        mesh.SetTriangles(tris, 0);
+        mesh.RecalculateBounds();
+        mesh.RecalculateTangents();
+        AssetDatabase.CreateAsset(mesh, path);
+        return mesh;
     }
 
     static void WithDetail(Material m, Texture2D detail, float tiling)

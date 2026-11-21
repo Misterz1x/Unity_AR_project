@@ -31,6 +31,7 @@ public class GreenPracticeController : MonoBehaviour
     int strokes;
     PuttSolution ideal;
     bool idealValid;
+    float shownGauge = -1f; // power of the last hit, shown until the next putt (-1 = none)
 
     bool Busy => launcher.CurrentPhase != AimPowerLauncher.Phase.Idle || ball.IsRolling;
 
@@ -130,12 +131,14 @@ public class GreenPracticeController : MonoBehaviour
         strokes = 0;
         result = "";
         status = name;
+        shownGauge = -1f;
     }
 
     public void StartPutt()
     {
         if (ball.LastResult != null && ball.LastResult.Holed && !ball.IsRolling && strokes > 0)
             return; // holed: press N for the next putt
+        shownGauge = -1f;
         launcher.BeginAim();
     }
 
@@ -182,6 +185,7 @@ public class GreenPracticeController : MonoBehaviour
 
     void OnLaunched(LaunchResult launch)
     {
+        shownGauge = launcher.GaugeValue;
         strokes++;
         ball.Launch(launch);
         result = "";
@@ -222,11 +226,11 @@ public class GreenPracticeController : MonoBehaviour
     {
         if (green == null || green.Model == null) return;
 
-        // Size from the screen height, so the panel fits small Game views and big screens.
+        // Size from the screen height, so it fits small Game views and big screens.
         float scale = Mathf.Clamp(Screen.height / 900f, 0.65f, 2.5f);
         int font = Mathf.RoundToInt(13f * scale);
-        float margin = 8f * scale;
-        float w = Mathf.Min(440f * scale, Screen.width - 2f * margin);
+        float margin = 10f * scale;
+        bool landscape = Screen.width >= Screen.height;
 
         var box = new GUIStyle(GUI.skin.box)
         {
@@ -234,46 +238,7 @@ public class GreenPracticeController : MonoBehaviour
             padding = new RectOffset((int)(8 * scale), (int)(8 * scale), (int)(6 * scale), (int)(6 * scale)),
         };
 
-        Vector2 b = Floor(ball.transform.position), h = Floor(hole.position);
-        float distance = (h - b).magnitude;
-        float rise = (green.Surface.HeightAt(h) - green.Surface.HeightAt(b)) * 100f;
-        float slopeHere = green.Surface.SlopeAt(b).magnitude * 100f;
-
-        string head = $"<b>{Def.name}</b>   stimp {Def.stimpFeet:F1}   ({greenIndex + 1}/{FamousGreens.All.Count})\n";
-        string body =
-            $"<b>{status}</b>\n" +
-            $"{Def.pins[green.pin].name} hole: {distance:F1} m, {(rise >= 0f ? "uphill" : "downhill")} {Mathf.Abs(rise):F0} cm. " +
-            $"Slope at ball {slopeHere:F1} %";
-        if (idealValid)
-        {
-            float aim = ideal.AimOffsetDegrees(b, h);
-            body += $"\nIdeal: aim {Mathf.Abs(aim):F1}° {(aim >= 0f ? "right" : "left")}, launch {ideal.Speed:F2} m/s";
-        }
-        if (!string.IsNullOrEmpty(result)) body += $"\n<b>{result}</b>";
-
-        // Leave out the description if the panel would cover too much of the view.
-        string text = head + $"<i>{Def.description}</i>\n" + body;
-        float height = box.CalcHeight(new GUIContent(text), w);
-        if (height > Screen.height * 0.45f)
-        {
-            text = head + body;
-            height = box.CalcHeight(new GUIContent(text), w);
-        }
-        GUI.Box(new Rect(margin, margin, w, height), text, box);
-
-        float y = margin * 2f + height;
-        if (launcher.CurrentPhase == AimPowerLauncher.Phase.Power)
-        {
-            float speed = launcher.GaugeValue * launcher.maxLaunchSpeed;
-            float barH = 26f * scale;
-            GUI.Box(new Rect(margin, y, w, barH), "");
-            GUI.Box(new Rect(margin + 2f, y + 2f, (w - 4f) * launcher.GaugeValue, barH - 4f), "");
-            var label = new GUIStyle(GUI.skin.label) { richText = true, fontSize = font, alignment = TextAnchor.MiddleLeft };
-            GUI.Label(new Rect(margin + 8f, y, w, barH),
-                $"<b>Power {launcher.GaugeValue * 100f:F0}   {speed:F2} m/s, rolls ~{RollSimulator.StopDistance(speed, ball.ActiveSettings):F1} m on flat</b>",
-                label);
-        }
-
+        // ---- key help, bottom left
         string help = launcher.CurrentPhase switch
         {
             AimPowerLauncher.Phase.Aiming => "A / D: aim (Shift = fine)   Space: confirm   Esc: cancel",
@@ -283,7 +248,136 @@ public class GreenPracticeController : MonoBehaviour
         };
         float helpW = Mathf.Min(560f * scale, Screen.width - 2f * margin);
         float helpH = box.CalcHeight(new GUIContent(help), helpW);
-        GUI.Box(new Rect(margin, Screen.height - margin - helpH, helpW, helpH), help, box);
+        Rect helpRect = new Rect(margin, Screen.height - margin - helpH, helpW, helpH);
+        GUI.Box(helpRect, help, box);
+
+        // ---- info panel: top right in landscape (the power bar is on the left), top in portrait
+        Vector2 b = Floor(ball.transform.position), h = Floor(hole.position);
+        float distance = (h - b).magnitude;
+        float rise = green.Surface.HeightAt(h) - green.Surface.HeightAt(b);
+        float slopeHere = green.Surface.SlopeAt(b).magnitude * 100f;
+
+        string head = $"<b>{Def.name}</b>   stimp {Def.stimpFeet:F1}   ({greenIndex + 1}/{FamousGreens.All.Count})\n";
+        string body =
+            $"<b>{status}</b>\n" +
+            $"{Def.pins[green.pin].name} hole: {distance:F1} m, {(rise >= 0f ? "uphill" : "downhill")} {Mathf.Abs(rise) * 100f:F0} cm. " +
+            $"Slope at ball {slopeHere:F1} %";
+        if (idealValid)
+        {
+            float aim = ideal.AimOffsetDegrees(b, h);
+            body += $"\nIdeal: aim {Mathf.Abs(aim):F1}° {(aim >= 0f ? "right" : "left")}, launch {ideal.Speed:F2} m/s";
+        }
+        if (!string.IsNullOrEmpty(result)) body += $"\n<b>{result}</b>";
+
+        float panelW = landscape ? Mathf.Min(420f * scale, Screen.width * 0.45f) : Screen.width - 2f * margin;
+        string text = head + $"<i>{Def.description}</i>\n" + body;
+        float panelH = box.CalcHeight(new GUIContent(text), panelW);
+        if (panelH > Screen.height * 0.4f)
+        {
+            text = head + body;
+            panelH = box.CalcHeight(new GUIContent(text), panelW);
+        }
+        float panelX = landscape ? Screen.width - margin - panelW : margin;
+        GUI.Box(new Rect(panelX, margin, panelW, panelH), text, box);
+
+        // ---- power bar: vertical on the left in landscape, horizontal above the help in portrait
+        DrawPowerBar(scale, font, margin, landscape, helpRect, distance, rise);
+    }
+
+    void DrawPowerBar(float scale, int font, float margin, bool vertical, Rect helpRect, float distance, float rise)
+    {
+        bool live = launcher.CurrentPhase == AimPowerLauncher.Phase.Power;
+        if (!live && shownGauge < 0f) return;
+        float value = live ? launcher.GaugeValue : shownGauge;
+
+        float thick = 44f * scale;
+        float label = 2.6f * font;
+        Rect frame;
+        if (vertical)
+        {
+            float top = margin + label, bottom = helpRect.y - margin - label;
+            float length = Mathf.Min(560f * scale, bottom - top);
+            frame = new Rect(margin + 6f * scale, top + (bottom - top - length) * 0.5f, thick, length);
+        }
+        else
+        {
+            float length = Mathf.Min(560f * scale, Screen.width - 2f * margin);
+            frame = new Rect((Screen.width - length) * 0.5f, helpRect.y - margin - label - thick, length, thick);
+        }
+
+        Fill(frame, new Color(0f, 0f, 0f, 0.55f));
+        float pad = 4f * scale;
+        Rect inner = new Rect(frame.x + pad, frame.y + pad, frame.width - 2f * pad, frame.height - 2f * pad);
+
+        // Fill from 0 (bottom / left) to value, coloured green -> yellow -> red.
+        const int segments = 60;
+        int filled = Mathf.RoundToInt(value * segments);
+        for (int i = 0; i < filled; i++)
+            Fill(Segment(inner, vertical, (float)i / segments, (i + 1f) / segments), PowerColour((i + 0.5f) / segments));
+
+        // Ticks every 10 %.
+        for (int t = 1; t < 10; t++)
+        {
+            Rect tick = Segment(inner, vertical, t / 10f - 0.002f, t / 10f + 0.002f);
+            if (vertical) tick.width *= t == 5 ? 0.6f : 0.35f; else tick.height *= t == 5 ? 0.6f : 0.35f;
+            Fill(tick, new Color(1f, 1f, 1f, 0.45f));
+        }
+
+        // Estimated power for the hole: flat roll-out to the hole + 40 cm, corrected for up / downhill.
+        RollSettings rules = ball.ActiveSettings;
+        float equivalent = distance + 0.4f + RollSettings.RollingGravityFactor * rise / Mathf.Max(1e-3f, rules.Mu);
+        float holeValue = RollSimulator.LaunchSpeedForDistance(Mathf.Max(0f, equivalent), rules) / launcher.maxLaunchSpeed;
+        var small = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(font * 0.85f), richText = true };
+        if (holeValue <= 1f)
+        {
+            Rect mark = Segment(frame, vertical, holeValue - 0.004f, holeValue + 0.004f);
+            Fill(mark, Color.white);
+            Rect tag = vertical
+                ? new Rect(frame.xMax + 4f * scale, mark.center.y - font, 140f * scale, 2f * font)
+                : new Rect(mark.center.x - 40f * scale, frame.y - 1.6f * font, 140f * scale, 1.6f * font);
+            GUI.Label(tag, vertical ? "<b>◄ hole (est.)</b>" : "<b>▼ hole (est.)</b>", small);
+        }
+
+        // Current value: marker line and labels.
+        Rect now = Segment(frame, vertical, value - 0.006f, value + 0.006f);
+        Fill(now, new Color(1f, 1f, 1f, 0.95f));
+
+        float speed = value * launcher.maxLaunchSpeed;
+        var big = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(font * 1.25f), richText = true, alignment = TextAnchor.MiddleCenter };
+        var info = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, wordWrap = true };
+        string speedText = $"{speed:F2} m/s\n~{RollSimulator.StopDistance(speed, rules):F1} m flat";
+        if (vertical)
+        {
+            GUI.Label(new Rect(frame.x - 20f * scale, frame.y - label, frame.width + 40f * scale, label), $"<b>{value * 100f:F0}</b>", big);
+            GUI.Label(new Rect(frame.x - 30f * scale, frame.yMax, frame.width + 60f * scale, label), speedText, info);
+        }
+        else
+        {
+            GUI.Label(new Rect(frame.x, frame.yMax, frame.width, label),
+                $"<b>Power {value * 100f:F0}</b>   {speed:F2} m/s, ~{RollSimulator.StopDistance(speed, rules):F1} m flat", info);
+        }
+    }
+
+    // Part of the bar from a to b (0..1), measured from the bottom (vertical) or the left (horizontal).
+    static Rect Segment(Rect r, bool vertical, float a, float b)
+    {
+        a = Mathf.Clamp01(a);
+        b = Mathf.Clamp01(b);
+        return vertical
+            ? new Rect(r.x, r.yMax - b * r.height, r.width, (b - a) * r.height)
+            : new Rect(r.x + a * r.width, r.y, (b - a) * r.width, r.height);
+    }
+
+    static Color PowerColour(float t) =>
+        t < 0.5f ? Color.Lerp(new Color(0.2f, 0.85f, 0.3f), new Color(1f, 0.85f, 0.15f), t / 0.5f)
+                 : Color.Lerp(new Color(1f, 0.85f, 0.15f), new Color(0.95f, 0.2f, 0.1f), (t - 0.5f) / 0.5f);
+
+    static void Fill(Rect r, Color c)
+    {
+        Color old = GUI.color;
+        GUI.color = c;
+        GUI.DrawTexture(r, Texture2D.whiteTexture);
+        GUI.color = old;
     }
 
     static Vector2 Floor(Vector3 v) => new Vector2(v.x, v.z);
