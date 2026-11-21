@@ -41,8 +41,9 @@ public static class FamousGreensBuilder
     static readonly string[] StoreBushes = { StorePack + "1/Tree.prefab", StorePack + "5/Tree 7.prefab" };
     static readonly string[] StorePalms =
     {
-        StorePack + "Palm/Tree 1.prefab", StorePack + "Palm/Tree 2.prefab", StorePack + "Palm/Tree 3.prefab",
-        StorePack + "Palm/Tree 4.prefab", StorePack + "Palm/Tree 5.prefab", StorePack + "Palm/Tree 8.prefab",
+        // fairly straight ones (Tree 2/3 have strong S-bends)
+        StorePack + "Palm/Tree 1.prefab", StorePack + "Palm/Tree 4.prefab",
+        StorePack + "Palm/Tree 5.prefab", StorePack + "Palm/Tree 8.prefab",
     };
 
     // Flagstick: 7 ft above the green (regulation-ish), standing on the cup bottom; bands every 30 cm.
