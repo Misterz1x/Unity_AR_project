@@ -39,6 +39,12 @@ public class AimPowerLauncher : MonoBehaviour
     [Tooltip("Height of the arrow above the bottom of the ball (m).")]
     public float arrowLift = 0.004f;
 
+    [Tooltip("Optional: the green. The arrow then follows its slope and stays above the grass.")]
+    public GreenView green;
+
+    [Tooltip("Length of the arrow from the ball (m), used to tilt it along the green.")]
+    public float arrowReach = 1.15f;
+
     public Phase CurrentPhase { get; private set; } = Phase.Idle;
 
     /// <summary>Aim direction on the floor (world, y = 0, unit length).</summary>
@@ -161,9 +167,37 @@ public class AimPowerLauncher : MonoBehaviour
             arrow.gameObject.SetActive(show);
         if (!show)
             return;
+        if (green != null && green.Model != null)
+        {
+            FitArrowToGreen();
+            return;
+        }
         float ballRadius = ball.lossyScale.y * 0.5f;
         arrow.SetPositionAndRotation(
             ball.position + Vector3.up * (arrowLift - ballRadius),
             Quaternion.LookRotation(AimDirection, Vector3.up));
+    }
+
+    // On a sloped green: tilt the arrow along the green and lift it over any bump under it.
+    void FitArrowToGreen()
+    {
+        var dir = new Vector2(AimDirection.x, AimDirection.z);
+        if (dir.sqrMagnitude < 1e-6f) return;
+        dir.Normalize();
+
+        var start = new Vector2(ball.position.x, ball.position.z);
+        float h0 = green.VisualHeightAt(start);
+        float h1 = green.VisualHeightAt(start + dir * arrowReach);
+        float clearance = Mathf.Max(arrowLift, 0.008f); // the green mesh is a few mm off the exact surface between vertices
+        float lift = clearance;
+        for (int i = 1; i < 10; i++)
+        {
+            float t = i / 10f;
+            float surface = green.VisualHeightAt(start + dir * (arrowReach * t));
+            lift = Mathf.Max(lift, surface - Mathf.Lerp(h0, h1, t) + clearance);
+        }
+
+        var forward = new Vector3(dir.x * arrowReach, h1 - h0, dir.y * arrowReach);
+        arrow.SetPositionAndRotation(new Vector3(start.x, h0 + lift, start.y), Quaternion.LookRotation(forward, Vector3.up));
     }
 }

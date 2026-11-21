@@ -105,6 +105,8 @@ public static class FamousGreensBuilder
         launcher.ball = ball.transform;
         launcher.hole = hole.transform;
         launcher.arrow = arrow.transform;
+        launcher.green = view;
+        launcher.arrowLift = 0.008f;
         launcher.AimAtHole();
 
         var puttCam = camGo.AddComponent<PuttCamera>();
