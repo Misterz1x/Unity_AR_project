@@ -38,6 +38,8 @@ namespace ARGolf.Putting
         public float SpeedAtHole { get; internal set; }
         /// <summary>Closest the ball centre came to the hole centre (m).</summary>
         public float ClosestApproach { get; internal set; }
+        /// <summary>Where on its path the ball came closest to the hole centre.</summary>
+        public Vector2 ClosestPoint { get; internal set; }
         /// <summary>
         /// Where the ball stopped, measured from the hole sideways to the start→hole line (m).
         /// Positive = right of the hole, seen from the start. 0 if holed.
@@ -78,8 +80,9 @@ namespace ARGolf.Putting
 
     /// <summary>
     /// Our own roll model (no Rigidbody). The ball moves on the floor plane, step by step:
-    ///   a = -mu g v̂ - (5/7) g ∇h        ∇h = slope of the green (small-slope approximation, fine up to ~8 %)
-    /// A ball at rest stays still while (5/7)|∇h| ≤ mu, otherwise it starts rolling downhill.
+    ///   a = -mu k g v̂ - (5/7) g ∇h      ∇h = slope of the green (small-slope approximation, fine up to ~8 %)
+    ///                                    k = friction scale of the grass (1 on the green, more on the fringe)
+    /// A ball at rest stays still while (5/7)|∇h| ≤ mu k, otherwise it starts rolling downhill.
     /// Holed rule: the ball centre enters the hole circle at ≤ maxCaptureSpeed. Faster = lip-out, it rolls on.
     /// </summary>
     public static class RollSimulator
@@ -102,7 +105,7 @@ namespace ARGolf.Putting
         {
             surface ??= PlaneGreen.Flat;
 
-            float friction = s.FrictionDeceleration;
+            float grassFriction = s.FrictionDeceleration;
             float pull = RollSettings.RollingGravityFactor * s.gravity;
             float dt = Mathf.Max(1e-4f, s.timeStep);
             float r = s.HoleRadius;
@@ -115,6 +118,7 @@ namespace ARGolf.Putting
             bool lippedOut = false;
 
             float closest = (p - hole).magnitude, closestSpeed = v.magnitude;
+            Vector2 closestPoint = p;
             bool insideHole = closest <= r; // a ball placed in the hole is ignored until it leaves
 
             var path = new List<PathPoint> { new PathPoint(0f, p, v.magnitude) };
@@ -122,6 +126,7 @@ namespace ARGolf.Putting
             while (t < s.maxRollTime && distance < s.maxRollDistance)
             {
                 Vector2 gravity = -pull * surface.SlopeAt(p);
+                float friction = grassFriction * surface.FrictionScaleAt(p);
                 float speed = v.magnitude;
                 float h = dt;
                 Vector2 a;
@@ -171,6 +176,7 @@ namespace ARGolf.Putting
                         p = hole;
                         path.Add(new PathPoint(t, p, 0f));
                         closest = 0f;
+                        closestPoint = hole;
                         break;
                     }
                     lippedOut = true;
@@ -181,7 +187,7 @@ namespace ARGolf.Putting
                     insideHole = false;
                 }
 
-                TrackClosest(p, next, v, vNext, hole, ref closest, ref closestSpeed);
+                TrackClosest(p, next, v, vNext, hole, ref closest, ref closestSpeed, ref closestPoint);
 
                 distance += (next - p).magnitude;
                 t += h;
@@ -212,6 +218,7 @@ namespace ARGolf.Putting
                 LaunchSpeed = launch.Speed,
                 SpeedAtHole = speedAtHole,
                 ClosestApproach = closest,
+                ClosestPoint = closestPoint,
                 LateralOffset = holed ? 0f : Vector2.Dot(miss, right),
                 LongShort = holed ? 0f : Vector2.Dot(miss, line),
                 Path = path,
@@ -235,16 +242,18 @@ namespace ARGolf.Putting
 
         // Closest point of segment a→b to c, with the speed there (linear in between).
         static void TrackClosest(Vector2 a, Vector2 b, Vector2 va, Vector2 vb, Vector2 c,
-            ref float closest, ref float closestSpeed)
+            ref float closest, ref float closestSpeed, ref Vector2 closestPoint)
         {
             Vector2 d = b - a;
             float len2 = Vector2.Dot(d, d);
             float u = len2 > 0f ? Mathf.Clamp01(Vector2.Dot(c - a, d) / len2) : 0f;
-            float dist = (a + d * u - c).magnitude;
+            Vector2 point = a + d * u;
+            float dist = (point - c).magnitude;
             if (dist < closest)
             {
                 closest = dist;
                 closestSpeed = Vector2.Lerp(va, vb, u).magnitude;
+                closestPoint = point;
             }
         }
     }

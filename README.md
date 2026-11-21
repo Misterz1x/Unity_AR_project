@@ -38,7 +38,10 @@ This scene tests the basics the golf game will need: rigidbody physics, bounce m
 ### Putting model (no AR yet)
 
 - **Roll model** (`Assets/Scripts/Putting/`): our own putting physics, not Unity's Rigidbody. The ball moves in 2D on the green, step by step: the grass slows it (`mu*g`, where `mu` comes from the green speed, Stimpmeter, default 10 ft) and the slope pulls it downhill (`5/7*g*slope`, the 5/7 because a rolling ball puts part of the pull into spin). So putts break on side slopes. It is holed if it rolls into the hole at 1.0 m/s or slower; faster balls lip out and roll on.
-- **Greens** (`IGreenSurface`): the shape of the green (height and slope at every point). For now a tilted plane; set **Test Slope Percent** on the ball's `VirtualBall` component to try it.
+- **Greens**: each green is data (`GreenDefinition`): outline, green speed, height features (tilt, tiers, mounds, ridges, domes), hole locations and practice putts. It is baked into a 10 cm height map the physics rolls on; off the green the fringe and rough slow the ball more.
+- **Built-in greens** (`FamousGreens`): a practice green plus five greens *inspired by* famous ones (island green, Augusta-16-style funnel, Pinehurst-style turtleback, Oakmont-style lightning-fast green, St Andrews-style double green). They are approximations from public descriptions, not surveys.
+- **Ideal line** (`PuttSolver`): finds the aim and speed that drop the ball gently, to show the player how much a putt breaks.
+- **Try it:** **Tools → AR Golf → Build Famous Greens Scene**, then press Play. Keys are shown on screen (Enter putt, N next putt, G next green, H slope colours, L ideal line, I watch the ideal putt).
 - **Launch contract:** every way of hitting the ball (swipe now, club or ball tracking later) produces a `LaunchResult`: speed (m/s), direction on the floor, timestamp. So the game can be built and tested before hit detection works.
 - **`SwipeLauncher`** + **`VirtualBall`**: swipe across the floor with a finger or the mouse to putt; the ball rolls along the simulated path.
 - **Unit tests** (`Assets/Tests/EditMode/`): check the model against reference values, e.g. a 2 m putt needs 1.48 m/s on a flat stimp-10 green, and against slopes (break direction, uphill/downhill distance, when a ball at rest starts rolling). Run them in **Window → General → Test Runner → EditMode**.
@@ -71,7 +74,7 @@ Assets/
   Prefabs/      Reusable objects (Pillar)
   Scenes/       Unity scenes
   Scripts/      Runtime scripts (BallDropController, CameraFollow, SwipeLauncher, VirtualBall)
-    Putting/    Plain C# putting model: LaunchResult, RollSettings, RollSimulator
+    Putting/    Plain C# putting model: roll physics, greens (height maps, built-in greens), ideal-putt solver
   Settings/     URP render pipeline settings
   Tests/        EditMode unit tests for the putting model
   Textures/     Textures (ground checkerboard)

@@ -45,13 +45,26 @@ Reference values (flat, stimp 10), covered by `Assets/Tests/EditMode/RollSimulat
 ```
 Assets/
   Scripts/
-    Putting/        ARGolf.Putting asmdef: plain C#, no MonoBehaviours (LaunchResult, RollSettings, RollSimulator, GreenSurface)
-    *.cs            MonoBehaviours in Assembly-CSharp (SwipeLauncher, VirtualBall, BallDropController, CameraFollow)
+    Putting/        ARGolf.Putting asmdef: plain C#, no MonoBehaviours (LaunchResult, RollSettings, RollSimulator,
+                    GreenSurface, HeightField, GreenDefinition, GreenModel, FamousGreens, PuttSolver)
+    *.cs            MonoBehaviours in Assembly-CSharp (VirtualBall, GreenView, GreenPracticeController, launchers, cameras)
   Tests/EditMode/   ARGolf.Putting.Tests asmdef (Unity Test Framework, NUnit)
   Editor/           editor-only tools
 ```
 - Physics and estimation logic go in `Scripts/Putting/` as plain C# so it can be unit-tested in EditMode.
 - Planned scripts (add as needed): `SessionFlow` (find floor → place hole → ready → rolling → result), `HolePlacer`, `PuttLine` (aim line), `HudController`/`ResultPanel`, `StatsStore` (JSON on phone), plus one launcher per hit-detection method.
+
+## Greens
+- A green is a `GreenDefinition` (green-local metres, x = right, y = away from the player): outline (oval + wobbles),
+  stimp, fringe, height features (tilt %, tiers, mounds/hollows, ridges/swales, crowns), pins, putts.
+- `GreenModel.Build` bakes it into a `HeightField` (10 cm grid, lowest point on the green = 0); `PlacedGreen` puts it
+  in the world (origin + yaw). Friction: green 1, fringe and rough scaled by stimp ratio.
+- Built-in greens in `FamousGreens` ("inspired by", not surveys; no course logos). `GreenTests` checks every green:
+  pins ≥ 1 m inside the edge on slopes < 75 % of the holding slope, balls on the green and at rest, putt names state
+  the real distance (±10 %), every putt holeable by `PuttSolver`. Add a green there and run the tests.
+- `PuttSolver.Solve` = ideal putt (drops at the speed that would roll ~40 cm past), used for the ideal line.
+- Scene: Tools > AR Golf > Build Famous Greens Scene -> `Assets/Scenes/FamousGreens.unity` (owner: Person A).
+  `GreenView` draws the green at runtime (`visualHeightScale` 0 = flat for AR, slope colours, contours).
 
 ## Phases (each has a check; don't start the next in a track before it passes)
 | # | Phase | Done when |

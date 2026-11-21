@@ -15,6 +15,9 @@ public class VirtualBall : MonoBehaviour
     [Tooltip("The hole. Only its X/Z position is used.")]
     public Transform hole;
 
+    [Tooltip("Optional: the green the ball rolls on (shape, speed, and the ball follows its height).")]
+    public GreenView green;
+
     public RollSettings settings = new RollSettings();
 
     [Header("Test slope (until greens have height maps)")]
@@ -22,10 +25,18 @@ public class VirtualBall : MonoBehaviour
              "The green mesh stays flat. Try (2, 0) to see a putt break.")]
     public Vector2 testSlopePercent;
 
-    /// <summary>Shape of the green for the physics. If null, a plane tilted by testSlopePercent is used.</summary>
+    /// <summary>
+    /// Shape of the green for the physics. If null: the GreenView's surface, else a plane tilted by testSlopePercent.
+    /// </summary>
     public IGreenSurface Surface { get; set; }
 
-    IGreenSurface ActiveSurface => Surface ?? PlaneGreen.FromPercent(testSlopePercent.x, testSlopePercent.y);
+    IGreenSurface ActiveSurface =>
+        Surface ?? (green != null && green.Surface != null
+            ? green.Surface
+            : (IGreenSurface)PlaneGreen.FromPercent(testSlopePercent.x, testSlopePercent.y));
+
+    /// <summary>Roll settings in use: the green's speed if a GreenView is set.</summary>
+    public RollSettings ActiveSettings => green != null ? green.RollSettingsFor(settings) : settings;
 
     /// <summary>Raised when the ball has stopped or dropped.</summary>
     public event Action<RollResult> Finished;
@@ -63,7 +74,7 @@ public class VirtualBall : MonoBehaviour
             return;
 
         rollStart = transform.position;
-        LastResult = RollSimulator.Simulate(launch, ToFloor(rollStart), ToFloor(hole.position), settings, ActiveSurface);
+        LastResult = RollSimulator.Simulate(launch, ToFloor(rollStart), ToFloor(hole.position), ActiveSettings, ActiveSurface);
         rollStartTime = Time.time;
         IsRolling = true;
         if (launcher != null) launcher.inputEnabled = false;
@@ -77,7 +88,8 @@ public class VirtualBall : MonoBehaviour
 
         float t = Time.time - rollStartTime;
         Vector2 p = LastResult.PositionAt(t);
-        Vector3 next = new Vector3(p.x, rollStart.y, p.y);
+        float y = green != null ? green.VisualHeightAt(p) + settings.BallRadius : rollStart.y;
+        Vector3 next = new Vector3(p.x, y, p.y);
 
         // Spin the ball to match the distance rolled.
         Vector3 step = next - transform.position;
