@@ -4,7 +4,7 @@ using UnityEngine;
 namespace ARGolf.Putting.Tests
 {
     /// <summary>
-    /// Checks the roll model against the reference table (flat green, stimp 10 ft):
+    /// Flat green: checks the roll model against the reference table (stimp 10 ft):
     ///   1 m -> 1.05 m/s, 2 m -> 1.48 m/s, 3 m -> 1.82 m/s, 5 m -> 2.34 m/s.
     /// </summary>
     public class RollSimulatorTests
@@ -17,8 +17,14 @@ namespace ARGolf.Putting.Tests
         [SetUp]
         public void SetUp() => flat = new RollSettings();
 
-        static RollResult Putt(float speed, Vector2 dir, Vector2 hole, RollSettings s) =>
-            RollSimulator.Simulate(new LaunchResult(speed, dir, 0.0), Origin, hole, s);
+        static RollResult Putt(float speed, Vector2 dir, Vector2 hole, RollSettings s, IGreenSurface green = null) =>
+            RollSimulator.Simulate(new LaunchResult(speed, dir, 0.0), Origin, hole, s, green);
+
+        static Vector2 Heading(float degreesRightOfForward)
+        {
+            float a = degreesRightOfForward * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Sin(a), Mathf.Cos(a));
+        }
 
         [Test]
         public void Mu_AtStimp10_IsAbout0056()
@@ -39,9 +45,13 @@ namespace ARGolf.Putting.Tests
         [TestCase(1.48f, 2f)]
         [TestCase(1.82f, 3f)]
         [TestCase(2.34f, 5f)]
-        public void StopDistance_MatchesReferenceTable(float speed, float expectedDistance)
+        public void SimulatedStopDistance_MatchesReferenceTable(float speed, float expectedDistance)
         {
-            Assert.That(RollSimulator.StopDistance(speed, flat), Is.EqualTo(expectedDistance).Within(0.03f));
+            var r = Putt(speed, Forward, new Vector2(10f, 0f), flat);
+
+            Assert.IsTrue(r.Stopped);
+            Assert.That(r.Distance, Is.EqualTo(expectedDistance).Within(0.03f));
+            Assert.That(r.Distance, Is.EqualTo(RollSimulator.StopDistance(speed, flat)).Within(0.002f));
         }
 
         [TestCase(1f, 0.035f)]
@@ -57,13 +67,13 @@ namespace ARGolf.Putting.Tests
         [Test]
         public void StraightPutt_WithGentleSpeed_IsHoled()
         {
-            // Speed to roll 2.5 m, hole at 2 m: arrives at ~0.74 m/s.
+            // Speed to roll 2.5 m, hole at 2 m: arrives at ~0.78 m/s.
             float v0 = RollSimulator.LaunchSpeedForDistance(2.5f, flat);
             var r = Putt(v0, Forward, new Vector2(0f, 2f), flat);
 
             Assert.IsTrue(r.Holed);
             Assert.That(r.SpeedAtHole, Is.LessThanOrEqualTo(flat.maxCaptureSpeed));
-            Assert.That(r.End.y, Is.EqualTo(2f).Within(0.01f));
+            Assert.That((r.End - new Vector2(0f, 2f)).magnitude, Is.LessThan(0.001f));
         }
 
         [Test]
@@ -84,7 +94,7 @@ namespace ARGolf.Putting.Tests
 
             Assert.IsFalse(r.Holed);
             Assert.That(r.SpeedAtHole, Is.GreaterThan(flat.maxCaptureSpeed));
-            Assert.That(r.LongShort, Is.EqualTo(3f).Within(0.03f));
+            Assert.That(r.LongShort, Is.EqualTo(3f).Within(0.01f));
         }
 
         [Test]
@@ -101,59 +111,39 @@ namespace ARGolf.Putting.Tests
         [Test]
         public void PuttAimedRight_MissesRight()
         {
-            // 2° right over 2 m is ~7 cm sideways, more than the 5.4 cm hole radius.
-            float a = 2f * Mathf.Deg2Rad;
-            var dir = new Vector2(Mathf.Sin(a), Mathf.Cos(a));
+            // 2° right passes ~7 cm from the hole centre, more than the 5.4 cm hole radius.
             float v0 = RollSimulator.LaunchSpeedForDistance(2.3f, flat);
-            var r = Putt(v0, dir, new Vector2(0f, 2f), flat);
+            var r = Putt(v0, Heading(2f), new Vector2(0f, 2f), flat);
 
             Assert.IsFalse(r.Holed);
-            Assert.That(r.LateralOffset, Is.EqualTo(2f * Mathf.Sin(a)).Within(0.001f));
-            Assert.That(r.LateralOffset, Is.GreaterThan(0f));
+            Assert.That(r.ClosestApproach, Is.EqualTo(2f * Mathf.Sin(2f * Mathf.Deg2Rad)).Within(0.001f));
+            Assert.That(r.LateralOffset, Is.EqualTo(2.3f * Mathf.Sin(2f * Mathf.Deg2Rad)).Within(0.002f));
+            Assert.That(r.SpeedAtHole, Is.GreaterThan(0f));
         }
 
         [Test]
         public void PuttAimed1DegreeOff_StillDropsAtShortRange()
         {
             // 1° over 2 m is ~3.5 cm sideways: inside the hole radius.
-            float a = 1f * Mathf.Deg2Rad;
-            var dir = new Vector2(-Mathf.Sin(a), Mathf.Cos(a));
             float v0 = RollSimulator.LaunchSpeedForDistance(2.3f, flat);
-            var r = Putt(v0, dir, new Vector2(0f, 2f), flat);
+            var r = Putt(v0, Heading(-1f), new Vector2(0f, 2f), flat);
 
             Assert.IsTrue(r.Holed);
         }
 
         [Test]
-        public void Uphill_StopsShorterThanFlat()
-        {
-            var uphill = new RollSettings { slopeDegrees = 2f };
-            float v0 = 1.48f;
-            float expected = v0 * v0 / (2f * uphill.gravity * (uphill.Mu + Mathf.Sin(2f * Mathf.Deg2Rad)));
-
-            Assert.That(RollSimulator.StopDistance(v0, uphill), Is.EqualTo(expected).Within(1e-4f));
-            Assert.That(RollSimulator.StopDistance(v0, uphill), Is.LessThan(RollSimulator.StopDistance(v0, flat)));
-        }
-
-        [Test]
-        public void SteepDownhill_NeverStops_IsCappedAtMaxRollDistance()
-        {
-            var downhill = new RollSettings { slopeDegrees = -5f };
-            var r = Putt(1f, Forward, new Vector2(10f, 10f), downhill);
-
-            Assert.IsFalse(r.Stopped);
-            Assert.That(r.Distance, Is.EqualTo(downhill.maxRollDistance));
-            Assert.That(r.Duration, Is.GreaterThan(0f));
-        }
-
-        [Test]
-        public void PositionAt_EndOfRoll_EqualsEnd()
+        public void PositionAt_FollowsThePath()
         {
             var r = Putt(1.48f, Forward, new Vector2(1f, 1f), flat);
 
-            Assert.That((r.PositionAt(r.Duration) - r.End).magnitude, Is.LessThan(1e-3f));
-            Assert.That((r.PositionAt(r.Duration + 5f) - r.End).magnitude, Is.LessThan(1e-3f));
             Assert.That((r.PositionAt(0f) - r.Start).magnitude, Is.LessThan(1e-6f));
+            Assert.That((r.PositionAt(r.Duration) - r.End).magnitude, Is.LessThan(1e-4f));
+            Assert.That((r.PositionAt(r.Duration + 5f) - r.End).magnitude, Is.LessThan(1e-4f));
+
+            // Halfway in time on a flat green: s = v0 t - mu g t² / 2.
+            float t = r.Duration * 0.5f;
+            float expected = 1.48f * t - 0.5f * flat.FrictionDeceleration * t * t;
+            Assert.That(r.PositionAt(t).y, Is.EqualTo(expected).Within(0.002f));
         }
 
         [Test]
@@ -162,6 +152,7 @@ namespace ARGolf.Putting.Tests
             var r = Putt(0f, Forward, new Vector2(0f, 2f), flat);
 
             Assert.IsFalse(r.Holed);
+            Assert.IsTrue(r.Stopped);
             Assert.That(r.Distance, Is.EqualTo(0f));
             Assert.That(r.Duration, Is.EqualTo(0f));
         }

@@ -19,16 +19,20 @@ Until that is decided, every input method must produce the same `LaunchResult`, 
 - **Launch contract:** `LaunchResult` = speed (m/s), unit direction on the floor (x = world X, y = world Z), timestamp. Keep it stable.
 
 ## Roll model
+2D on the floor plane, fixed time step (default 1/240 s), green shape from `IGreenSurface` (height + slope):
 ```
-a  = -mu*g - g*sin(theta)          theta = slope along roll, + uphill
-mu = vs^2 / (2*g*ds)               vs = 1.83 m/s (Stimpmeter release), ds = stimp in metres
+a  = -mu*g*v_hat - (5/7)*g*grad(h)   grad(h) = slope (dh/dx, dh/dz); 5/7 = rolling solid ball
+mu = vs^2 / (2*g*ds)                 vs = 1.83 m/s (Stimpmeter release), ds = stimp in metres
 flat stop distance = v^2 / (2*mu*g)
+at rest: stays while (5/7)*|grad(h)| <= mu, else rolls downhill
 ```
-- Default stimp 10 ft -> mu ≈ 0.056. Tunable in `RollSettings`.
-- Holed rule: ball centre passes over the hole at ≤ 1.0 m/s (≈ "would roll 3 ft past" at stimp 10).
-- Hole Ø 108 mm, ball Ø 42.7 mm. Path is a straight line; side slope (break) is not modelled yet.
+- Default stimp 10 ft -> mu ≈ 0.056; a ball at rest holds on slopes up to ~7.8 %. Tunable in `RollSettings`.
+- Small-slope approximation; fine for greens (< ~8 %). Slopes in UI and data: percent.
+- Holed rule: ball centre enters the hole circle at ≤ 1.0 m/s (≈ "would roll 3 ft past" at stimp 10). Faster = lip-out, ball rolls on.
+- Hole Ø 108 mm, ball Ø 42.7 mm.
+- Sanity check (stimp 10, 2 % side slope): 3 m putt aims ~27 cm uphill, 6 m ~63 cm.
 
-Reference values (flat, stimp 10), covered by `Assets/Tests/EditMode/RollSimulatorTests.cs`:
+Reference values (flat, stimp 10), covered by `Assets/Tests/EditMode/RollSimulatorTests.cs` (slopes: `SlopeRollTests.cs`):
 
 | Putt | Launch speed | Travel per frame @30 fps |
 |---|---|---|
@@ -41,7 +45,7 @@ Reference values (flat, stimp 10), covered by `Assets/Tests/EditMode/RollSimulat
 ```
 Assets/
   Scripts/
-    Putting/        ARGolf.Putting asmdef: plain C#, no MonoBehaviours (LaunchResult, RollSettings, RollSimulator)
+    Putting/        ARGolf.Putting asmdef: plain C#, no MonoBehaviours (LaunchResult, RollSettings, RollSimulator, GreenSurface)
     *.cs            MonoBehaviours in Assembly-CSharp (SwipeLauncher, VirtualBall, BallDropController, CameraFollow)
   Tests/EditMode/   ARGolf.Putting.Tests asmdef (Unity Test Framework, NUnit)
   Editor/           editor-only tools

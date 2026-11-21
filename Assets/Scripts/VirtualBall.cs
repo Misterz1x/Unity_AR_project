@@ -3,7 +3,7 @@ using ARGolf.Putting;
 using UnityEngine;
 
 /// <summary>
-/// Moves the ball model along the path computed by RollSimulator (no Rigidbody).
+/// Moves the ball model along the (possibly curved) path computed by RollSimulator (no Rigidbody).
 /// Listens to a SwipeLauncher (later: any tracking source that produces a LaunchResult).
 /// Put this on the ball; the ball object should be scaled to 0.0427 (real size in metres).
 /// </summary>
@@ -16,6 +16,16 @@ public class VirtualBall : MonoBehaviour
     public Transform hole;
 
     public RollSettings settings = new RollSettings();
+
+    [Header("Test slope (until greens have height maps)")]
+    [Tooltip("Tilts the green for the physics only, in percent. X: + = rises towards +X. Y: + = rises towards +Z. " +
+             "The green mesh stays flat. Try (2, 0) to see a putt break.")]
+    public Vector2 testSlopePercent;
+
+    /// <summary>Shape of the green for the physics. If null, a plane tilted by testSlopePercent is used.</summary>
+    public IGreenSurface Surface { get; set; }
+
+    IGreenSurface ActiveSurface => Surface ?? PlaneGreen.FromPercent(testSlopePercent.x, testSlopePercent.y);
 
     /// <summary>Raised when the ball has stopped or dropped.</summary>
     public event Action<RollResult> Finished;
@@ -53,7 +63,7 @@ public class VirtualBall : MonoBehaviour
             return;
 
         rollStart = transform.position;
-        LastResult = RollSimulator.Simulate(launch, ToFloor(rollStart), ToFloor(hole.position), settings);
+        LastResult = RollSimulator.Simulate(launch, ToFloor(rollStart), ToFloor(hole.position), settings, ActiveSurface);
         rollStartTime = Time.time;
         IsRolling = true;
         if (launcher != null) launcher.inputEnabled = false;
