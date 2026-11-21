@@ -19,8 +19,10 @@ namespace ARGolf.Putting
 
         [Header("Speed")]
         public float stimpFeet = 10f;
-        public float fringeStimpFeet = 6f;
-        public float roughStimpFeet = 3f;
+        [Tooltip("Fringe / collar: longer grass, the ball slows clearly faster.")]
+        public float fringeStimpFeet = 5f;
+        [Tooltip("Rough: the ball stops within a few cm to a few dm.")]
+        public float roughStimpFeet = 1.5f;
 
         [Header("Shape")]
         public GreenOutline outline = new GreenOutline();

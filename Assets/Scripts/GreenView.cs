@@ -32,13 +32,20 @@ public class GreenView : MonoBehaviour
     [Tooltip("URP Lit material for the green; its base map is replaced by the generated texture.")]
     public Material greenMaterial;
     public Material fringeMaterial;
+    [Tooltip("URP Lit material for the rough around the green (use the same as the ground).")]
+    public Material roughMaterial;
     [Tooltip("Unlit material for the ideal line and the ball path.")]
     public Material lineMaterial;
+    [Tooltip("Grey grass detail (URP Lit Detail Albedo x2). Empty = generated at runtime.")]
+    public Texture2D grassDetail;
 
     [Header("Mesh")]
     [Range(64, 512)] public int segments = 200;
     [Range(8, 80)] public int rings = 40;
-    [Range(256, 2048)] public int textureSize = 1024;
+    [Tooltip("Upper limit for the green texture; it aims for ~1.5 cm per pixel.")]
+    [Range(512, 4096)] public int textureSize = 2048;
+    [Tooltip("Width of the rough slope around the fringe that blends down to the ground (m).")]
+    public float roughApronWidth = 2.5f;
 
     public GreenModel Model { get; private set; }
     public GreenDefinition Definition => Model?.Definition;
@@ -54,13 +61,18 @@ public class GreenView : MonoBehaviour
     static readonly Color GrassLight = new Color(0.33f, 0.60f, 0.22f);
     static readonly Color GrassDark = new Color(0.29f, 0.54f, 0.19f);
     static readonly Color FringeGrass = new Color(0.25f, 0.47f, 0.16f);
+    static readonly Color RoughGrass = new Color(0.2f, 0.38f, 0.13f);
     const float StripeWidth = 1.5f;
+    const float TargetTexel = 0.015f;            // green texture: ~1.5 cm per pixel
+    const float GreenDetailTile = 0.5f, FringeDetailTile = 0.8f, RoughDetailTile = 1.4f; // m per detail tile
+    const float FringeSink = 0.003f, RoughSink = 0.012f; // ball sits down in longer grass (m)
 
     MeshFilter meshFilter;
     MeshRenderer meshRenderer;
     Mesh mesh;
     Texture2D texture;
-    Material greenInstance, fringeInstance;
+    Material greenInstance, fringeInstance, roughInstance;
+    float groundLevel; // local height the rough apron blends down to
     GameObject cup;
     Mesh cupMesh;
     Material cupInstance, rimInstance;
@@ -98,11 +110,35 @@ public class GreenView : MonoBehaviour
         return new Vector3(w.x, VisualHeightAt(w), w.y);
     }
 
-    /// <summary>Drawn surface height (world Y) at a world floor position.</summary>
+    /// <summary>Drawn surface height (world Y) at a world floor position, including the rough apron.</summary>
     public float VisualHeightAt(Vector2 world)
     {
-        if (Surface == null) return transform.position.y;
-        return transform.position.y + visualHeightScale * Surface.Local.HeightAt(Surface.ToLocal(world));
+        if (Surface == null || Model == null) return transform.position.y;
+        return transform.position.y + LocalVisualHeight(Surface.ToLocal(world));
+    }
+
+    /// <summary>How far the ball sits down into the grass here (m): fringe a little, rough more.</summary>
+    public float SinkAt(Vector2 world)
+    {
+        switch (GrassAt(world))
+        {
+            case GrassKind.Fringe: return FringeSink;
+            case GrassKind.Rough: return RoughSink;
+            default: return 0f;
+        }
+    }
+
+    /// <summary>Redraws the green texture only (after changing contours or slope colours).</summary>
+    public void RefreshTexture() => RebuildTexture();
+
+    // Green and fringe: the real shape (scaled). Rough: blends from the fringe edge down to the ground.
+    float LocalVisualHeight(Vector2 local)
+    {
+        float h = visualHeightScale * Model.HeightAt(local);
+        float beyondFringe = Model.Definition.outline.DistanceOutside(local) - Model.Definition.fringeWidth;
+        if (beyondFringe <= 0f) return h;
+        float t = Mathf.Clamp01(beyondFringe / Mathf.Max(0.1f, roughApronWidth));
+        return Mathf.Lerp(h, groundLevel, t * t * (3f - 2f * t));
     }
 
     public Vector3 PinWorldPosition(int index) =>
@@ -176,13 +212,14 @@ public class GreenView : MonoBehaviour
         Release(texture);
         Release(greenInstance);
         Release(fringeInstance);
+        Release(roughInstance);
         Release(cupMesh);
         Release(cupInstance);
         Release(rimInstance);
         mesh = null;
         texture = null;
         cupMesh = null;
-        greenInstance = fringeInstance = cupInstance = rimInstance = null;
+        greenInstance = fringeInstance = roughInstance = cupInstance = rimInstance = null;
     }
 
     // ------------------------------------------------------------------ building
@@ -206,9 +243,16 @@ public class GreenView : MonoBehaviour
 
         Release(greenInstance);
         Release(fringeInstance);
+        Release(roughInstance);
         greenInstance = MakeMaterial(greenMaterial, Color.white);
         fringeInstance = MakeMaterial(fringeMaterial, FringeGrass);
-        meshRenderer.sharedMaterials = new[] { greenInstance, fringeInstance };
+        roughInstance = MakeMaterial(roughMaterial, RoughGrass);
+        TextureFrame(Model, out _, out float frame);
+        Texture2D detail = grassDetail != null ? grassDetail : GrassTextures.Detail;
+        ApplyDetail(greenInstance, detail, frame / GreenDetailTile, 0.8f);
+        ApplyDetail(fringeInstance, detail, frame / FringeDetailTile, 1f);
+        ApplyDetail(roughInstance, detail, frame / RoughDetailTile, 1f);
+        meshRenderer.sharedMaterials = new[] { greenInstance, fringeInstance, roughInstance };
 
         RebuildTexture();
         UpdateCup();
@@ -223,54 +267,57 @@ public class GreenView : MonoBehaviour
         Surface = new PlacedGreen(Model, new Vector2(builtPosition.x, builtPosition.z), builtYaw, builtPosition.y);
     }
 
-    // Polar mesh: rings from the centre to the edge (submesh 0, green), then a fringe ring
-    // and a skirt down to below the lowest point (submesh 1).
+    // Polar mesh: rings from the centre to the edge (submesh 0, green), a fringe ring (submesh 1),
+    // then rough rings that blend down to the ground (submesh 2), so a ball in the rough sits on grass.
     Mesh BuildMesh(GreenModel model, out float lowest)
     {
         GreenOutline o = model.Definition.outline;
         float fringe = model.Definition.fringeWidth;
         int n = segments;
+        const int apronRings = 6;
         var vertices = new List<Vector3>();
         var uvs = new List<Vector2>();
         TextureFrame(model, out Vector2 texMin, out float texSize);
 
-        Vector3 Vertex(Vector2 local, float drop = 0f)
+        Vector3 Vertex(Vector2 local, float height)
         {
             uvs.Add((local - texMin) / texSize);
-            return new Vector3(local.x, visualHeightScale * model.HeightAt(local) - drop, local.y);
+            return new Vector3(local.x, height, local.y);
         }
 
-        // Centre + rings.
-        vertices.Add(Vertex(o.center));
+        // Centre + green rings.
+        vertices.Add(Vertex(o.center, visualHeightScale * model.HeightAt(o.center)));
         for (int r = 1; r <= rings; r++)
         {
             float t = (float)r / rings;
             for (int k = 0; k < n; k++)
             {
-                float phi = 2f * Mathf.PI * k / n;
-                vertices.Add(Vertex(Vector2.Lerp(o.center, o.EdgePoint(phi), t)));
+                Vector2 p = Vector2.Lerp(o.center, o.EdgePoint(2f * Mathf.PI * k / n), t);
+                vertices.Add(Vertex(p, visualHeightScale * model.HeightAt(p)));
             }
         }
         int fringeStart = vertices.Count;
-        for (int k = 0; k < n; k++) vertices.Add(Vertex(o.EdgePoint(2f * Mathf.PI * k / n, fringe)));
+        for (int k = 0; k < n; k++)
+        {
+            Vector2 p = o.EdgePoint(2f * Mathf.PI * k / n, fringe);
+            vertices.Add(Vertex(p, visualHeightScale * model.HeightAt(p)));
+        }
 
         lowest = 0f;
         for (int i = 0; i < vertices.Count; i++) lowest = Mathf.Min(lowest, vertices[i].y);
-        float skirtY = lowest - 0.05f;
-        lowest = skirtY;
-        // Skirt: own vertices (top and bottom), so its normals point sideways.
-        int skirtTop = vertices.Count;
-        for (int k = 0; k < n; k++)
+        groundLevel = lowest - (model.Definition.waterAround ? 0.15f : 0.03f);
+        lowest = groundLevel;
+
+        // Rough apron rings (heights from LocalVisualHeight, so the ball matches the mesh).
+        int apronStart = vertices.Count;
+        for (int r = 1; r <= apronRings; r++)
         {
-            vertices.Add(vertices[fringeStart + k]);
-            uvs.Add(uvs[fringeStart + k]);
-        }
-        int skirtStart = vertices.Count;
-        for (int k = 0; k < n; k++)
-        {
-            Vector3 top = vertices[fringeStart + k];
-            vertices.Add(new Vector3(top.x, skirtY, top.z));
-            uvs.Add(uvs[fringeStart + k]);
+            float extra = fringe + roughApronWidth * r / apronRings;
+            for (int k = 0; k < n; k++)
+            {
+                Vector2 p = o.EdgePoint(2f * Mathf.PI * k / n, extra);
+                vertices.Add(Vertex(p, LocalVisualHeight(p)));
+            }
         }
 
         var green = new List<int>();
@@ -286,21 +333,28 @@ public class GreenView : MonoBehaviour
                 Quad(green, inner + k, inner + (k + 1) % n, outer + k, outer + (k + 1) % n);
         }
 
-        var rest = new List<int>();
+        var fringeTris = new List<int>();
         int edge = 1 + (rings - 1) * n;
         for (int k = 0; k < n; k++)
+            Quad(fringeTris, edge + k, edge + (k + 1) % n, fringeStart + k, fringeStart + (k + 1) % n);
+
+        var rough = new List<int>();
+        for (int r = 0; r < apronRings; r++)
         {
-            Quad(rest, edge + k, edge + (k + 1) % n, fringeStart + k, fringeStart + (k + 1) % n);
-            Quad(rest, skirtTop + k, skirtTop + (k + 1) % n, skirtStart + k, skirtStart + (k + 1) % n);
+            int inner = r == 0 ? fringeStart : apronStart + (r - 1) * n;
+            int outer = apronStart + r * n;
+            for (int k = 0; k < n; k++)
+                Quad(rough, inner + k, inner + (k + 1) % n, outer + k, outer + (k + 1) % n);
         }
 
         var m = new Mesh { name = "Green " + model.Definition.id, hideFlags = HideFlags.DontSave };
         m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
         m.SetVertices(vertices);
         m.SetUVs(0, uvs);
-        m.subMeshCount = 2;
+        m.subMeshCount = 3;
         m.SetTriangles(green, 0);
-        m.SetTriangles(rest, 1);
+        m.SetTriangles(fringeTris, 1);
+        m.SetTriangles(rough, 2);
         m.RecalculateNormals();
         m.RecalculateBounds();
         return m;
@@ -324,7 +378,7 @@ public class GreenView : MonoBehaviour
     {
         if (Model == null) return;
         TextureFrame(Model, out Vector2 min, out float size);
-        int res = textureSize;
+        int res = Mathf.Clamp(Mathf.NextPowerOfTwo(Mathf.CeilToInt(size / TargetTexel)), 512, Mathf.Max(512, textureSize));
         if (texture == null || texture.width != res)
         {
             Release(texture);
@@ -333,7 +387,8 @@ public class GreenView : MonoBehaviour
                 name = "Green texture",
                 hideFlags = HideFlags.DontSave,
                 wrapMode = TextureWrapMode.Clamp,
-                anisoLevel = 4,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 8,
             };
         }
 
@@ -342,35 +397,52 @@ public class GreenView : MonoBehaviour
         var pixels = new Color32[res * res];
         bool needHeights = showContours || showSlopeColours;
 
-        // Smooth heights from the feature formulas (not the 10 cm grid), shifted like the model.
-        float[] heights = null;
+        // Smooth heights from the feature formulas (not the 10 cm grid) on a grid of up to 1024²,
+        // with their slope; sampled smoothly for every texture pixel.
+        int n = Mathf.Min(res, 1024);
+        float cell = size / n;
+        float[] hs = null, gxs = null, gys = null;
         if (needHeights)
         {
             GreenDefinition d = Model.Definition;
             float offset = d.FeatureHeightAt(Model.Heights.Origin) - Model.Heights[0, 0];
-            heights = new float[res * res];
-            for (int y = 0; y < res; y++)
-                for (int x = 0; x < res; x++)
-                    heights[x + y * res] = d.FeatureHeightAt(min + new Vector2((x + 0.5f) * texel, (y + 0.5f) * texel)) - offset;
+            hs = new float[n * n];
+            gxs = new float[n * n];
+            gys = new float[n * n];
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                    hs[x + y * n] = d.FeatureHeightAt(min + new Vector2((x + 0.5f) * cell, (y + 0.5f) * cell)) - offset;
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    int xl = Mathf.Max(0, x - 1), xr = Mathf.Min(n - 1, x + 1);
+                    int yd = Mathf.Max(0, y - 1), yu = Mathf.Min(n - 1, y + 1);
+                    gxs[x + y * n] = (hs[xr + y * n] - hs[xl + y * n]) / ((xr - xl) * cell);
+                    gys[x + y * n] = (hs[x + yu * n] - hs[x + yd * n]) / ((yu - yd) * cell);
+                }
         }
 
+        float toCoarse = (float)n / res;
         for (int y = 0; y < res; y++)
         {
+            float stripeY = min.y + (y + 0.5f) * texel;
+            // Mowing stripes with a soft edge.
+            float stripe = Mathf.Repeat(stripeY, 2f * StripeWidth) / StripeWidth; // 0..2
+            float edgeDist = Mathf.Min(Mathf.Abs(stripe), Mathf.Abs(stripe - 1f), Mathf.Abs(stripe - 2f)) * StripeWidth;
+            float blend = Mathf.Clamp01(edgeDist / (3f * texel));
+            Color stripeColour = stripe < 1f
+                ? Color.Lerp(GrassDark, GrassLight, 0.5f + 0.5f * blend)
+                : Color.Lerp(GrassLight, GrassDark, 0.5f + 0.5f * blend);
+            float cv = (y + 0.5f) * toCoarse - 0.5f;
+
             for (int x = 0; x < res; x++)
             {
-                float stripeY = min.y + (y + 0.5f) * texel;
-                // Soft edge between mowing stripes.
-                float stripe = Mathf.Repeat(stripeY, 2f * StripeWidth) / StripeWidth; // 0..2
-                float light = Mathf.Clamp01(Mathf.Min(Mathf.Abs(stripe - 0f), Mathf.Abs(stripe - 1f), Mathf.Abs(stripe - 2f)) * StripeWidth / (2f * texel));
-                Color c = stripe < 1f ? Color.Lerp(GrassDark, GrassLight, 0.5f + 0.5f * light) : Color.Lerp(GrassLight, GrassDark, 0.5f + 0.5f * light);
-
+                Color c = stripeColour;
                 if (needHeights)
                 {
-                    int k = x + y * res;
-                    int xl = Mathf.Max(0, x - 1), xr = Mathf.Min(res - 1, x + 1);
-                    int yd = Mathf.Max(0, y - 1), yu = Mathf.Min(res - 1, y + 1);
-                    float gx = (heights[xr + y * res] - heights[xl + y * res]) / ((xr - xl) * texel);
-                    float gy = (heights[x + yu * res] - heights[x + yd * res]) / ((yu - yd) * texel);
+                    float cu = (x + 0.5f) * toCoarse - 0.5f;
+                    float h = Bilinear(hs, n, cu, cv);
+                    float gx = Bilinear(gxs, n, cu, cv), gy = Bilinear(gys, n, cu, cv);
                     float slope = Mathf.Sqrt(gx * gx + gy * gy);
 
                     if (showSlopeColours)
@@ -378,17 +450,16 @@ public class GreenView : MonoBehaviour
 
                     if (showContours && contourInterval > 0f)
                     {
-                        float level = heights[k] / contourInterval;
+                        float level = h / contourInterval;
                         float nearest = Mathf.Round(level);
                         // Distance to the nearest line on the ground (m), from height distance / slope.
                         float dist = Mathf.Abs(level - nearest) * contourInterval / Mathf.Max(slope, 1e-4f);
                         bool major = Mathf.Abs(Mathf.Repeat(nearest, 5f)) < 0.5f;
                         float half = (major ? 1.8f : 1f) * Mathf.Max(contourWidth, texel) * 0.5f;
-                        float coverage = Mathf.Clamp01(1f - (dist - half) / texel); // 1 texel soft edge
+                        float coverage = Mathf.Clamp01(1f - (dist - half) / texel); // 1 pixel soft edge
                         c = Color.Lerp(c, new Color(0.08f, 0.2f, 0.05f), coverage * (major ? 0.55f : 0.35f));
                     }
                 }
-
                 pixels[x + y * res] = c;
             }
         }
@@ -400,6 +471,16 @@ public class GreenView : MonoBehaviour
             if (greenInstance.HasProperty("_BaseMap")) greenInstance.SetTexture("_BaseMap", texture);
             if (greenInstance.HasProperty("_MainTex")) greenInstance.SetTexture("_MainTex", texture);
         }
+    }
+
+    static float Bilinear(float[] a, int n, float u, float v)
+    {
+        u = Mathf.Clamp(u, 0f, n - 1);
+        v = Mathf.Clamp(v, 0f, n - 1);
+        int i = Mathf.Min((int)u, n - 2), j = Mathf.Min((int)v, n - 2);
+        float fu = u - i, fv = v - j;
+        int k = i + j * n;
+        return Mathf.Lerp(Mathf.Lerp(a[k], a[k + 1], fu), Mathf.Lerp(a[k + n], a[k + n + 1], fu), fv);
     }
 
     // The active hole: a dark disc with a light rim, as a small mesh that follows the green's surface,
@@ -493,6 +574,16 @@ public class GreenView : MonoBehaviour
             if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.1f);
         }
         return m;
+    }
+
+    // URP Lit "Detail Albedo x2": grey detail multiplies the base colour by 2 × detail (0.5 = no change).
+    static void ApplyDetail(Material m, Texture2D detail, float tiling, float strength)
+    {
+        if (m == null || detail == null || !m.HasProperty("_DetailAlbedoMap")) return;
+        m.SetTexture("_DetailAlbedoMap", detail);
+        m.SetTextureScale("_DetailAlbedoMap", Vector2.one * tiling);
+        if (m.HasProperty("_DetailAlbedoMapScale")) m.SetFloat("_DetailAlbedoMapScale", strength);
+        m.EnableKeyword("_DETAIL_MULX2");
     }
 
     LineRenderer EnsureLine(ref LineRenderer line, string name, Color colour)

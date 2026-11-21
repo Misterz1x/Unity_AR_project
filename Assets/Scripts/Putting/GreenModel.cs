@@ -75,14 +75,25 @@ namespace ARGolf.Putting
         public float HeightAt(Vector2 p) => Heights.HeightAt(p);
         public Vector2 SlopeAt(Vector2 p) => Heights.SlopeAt(p);
 
+        /// <summary>
+        /// Friction relative to the green: 1 on the green, fringe and rough scaled by the stimp ratio.
+        /// Blends over GrassBlend metres at each edge, so the ball does not hit a sudden wall of friction.
+        /// </summary>
         public float FrictionScaleAt(Vector2 p)
         {
-            switch (GrassAt(p))
-            {
-                case GrassKind.Green: return 1f;
-                case GrassKind.Fringe: return fringeFriction;
-                default: return roughFriction;
-            }
+            float outside = Definition.outline.DistanceOutside(p);
+            float toFringe = Smooth((outside + 0.5f * GrassBlend) / GrassBlend);
+            float toRough = Smooth((outside - Definition.fringeWidth + 0.5f * GrassBlend) / GrassBlend);
+            return Mathf.Lerp(Mathf.Lerp(1f, fringeFriction, toFringe), roughFriction, toRough);
+        }
+
+        /// <summary>Width of the friction blend at the green and fringe edges (m).</summary>
+        public const float GrassBlend = 0.1f;
+
+        static float Smooth(float t)
+        {
+            t = Mathf.Clamp01(t);
+            return t * t * (3f - 2f * t);
         }
 
         /// <summary>Steepest slope within radius of p (dimensionless), sampled on rings.</summary>

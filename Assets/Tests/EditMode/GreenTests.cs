@@ -106,6 +106,53 @@ namespace ARGolf.Putting.Tests
             Assert.That(model.FrictionScaleAt(edge + outward * 3f), Is.EqualTo(d.stimpFeet / d.roughStimpFeet).Within(1e-5f));
         }
 
+        // Flat round green, radius 5 m, fringe 0.9 m, stimp 10 / fringe 5 / rough 1.5.
+        static GreenModel FlatRoundGreen() =>
+            GreenModel.Build(new GreenDefinition { outline = new GreenOutline { halfSize = new Vector2(5f, 5f) } });
+
+        [Test]
+        public void Friction_ChangesSmoothlyAtTheGrassEdges()
+        {
+            var model = FlatRoundGreen();
+            float last = model.FrictionScaleAt(Vector2.zero), maxStep = 0f;
+            for (float x = 4.5f; x < 7f; x += 0.001f)
+            {
+                float f = model.FrictionScaleAt(new Vector2(x, 0f));
+                maxStep = Mathf.Max(maxStep, Mathf.Abs(f - last));
+                last = f;
+            }
+            Assert.That(maxStep, Is.LessThan(0.15f), "no sudden jump in friction");
+            Assert.That(model.FrictionScaleAt(new Vector2(5.45f, 0f)), Is.EqualTo(2f).Within(1e-4f), "fringe = 10 / 5");
+            Assert.That(model.FrictionScaleAt(new Vector2(7f, 0f)), Is.EqualTo(10f / 1.5f).Within(1e-3f), "rough = 10 / 1.5");
+        }
+
+        [Test]
+        public void BallLeavingTheGreenAt1MetrePerSecond_StopsInTheFringe()
+        {
+            var model = FlatRoundGreen();
+            var s = model.MakeRollSettings();
+            // Arrive at the edge (5 m) at 1 m/s: v0² = 1 + 2 mu g 5.
+            float v0 = Mathf.Sqrt(1f + 2f * s.FrictionDeceleration * 5f);
+            var r = RollSimulator.Simulate(new LaunchResult(v0, Vector2.right, 0.0), Vector2.zero, new Vector2(0f, -30f), s, model);
+
+            Assert.That(model.GrassAt(r.End), Is.EqualTo(GrassKind.Fringe));
+            // On the fringe (friction x2) 1 m/s stops in 1 / (2 · 2 mu g) ≈ 0.45 m; on the green it would be 0.91 m.
+            Assert.That(r.End.x - 5f, Is.EqualTo(1f / (4f * s.FrictionDeceleration)).Within(0.05f));
+        }
+
+        [Test]
+        public void BallEnteringTheRough_StopsWithinAFewCentimetres()
+        {
+            var model = FlatRoundGreen();
+            var s = model.MakeRollSettings();
+            // Arrive at the rough (5.9 m) at 1 m/s: 1 + 2 mu g (5 + 2 · 0.9).
+            float v0 = Mathf.Sqrt(1f + 2f * s.FrictionDeceleration * (5f + 2f * 0.9f));
+            var r = RollSimulator.Simulate(new LaunchResult(v0, Vector2.right, 0.0), Vector2.zero, new Vector2(0f, -30f), s, model);
+
+            Assert.That(model.GrassAt(r.End), Is.EqualTo(GrassKind.Rough));
+            Assert.That(r.End.x - 5.9f, Is.LessThan(0.2f), "rough friction x6.7 stops a 1 m/s ball in ~14 cm");
+        }
+
         [Test]
         public void BallRunningOffTheTurtleback_StopsSoonInTheCollectionArea()
         {

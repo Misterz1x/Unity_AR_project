@@ -88,7 +88,7 @@ public class VirtualBall : MonoBehaviour
 
         float t = Time.time - rollStartTime;
         Vector2 p = LastResult.PositionAt(t);
-        float y = green != null ? green.VisualHeightAt(p) + settings.BallRadius : rollStart.y;
+        float y = green != null ? green.VisualHeightAt(p) + settings.BallRadius - green.SinkAt(p) : rollStart.y;
         Vector3 next = new Vector3(p.x, y, p.y);
 
         // Spin the ball to match the distance rolled.

@@ -79,12 +79,14 @@ public class GreenPracticeController : MonoBehaviour
         greenIndex = ((index % count) + count) % count;
         green.SetGreen(FamousGreens.All[greenIndex].id);
 
-        float low = green.transform.position.y + green.LowestVisualHeight - 0.01f;
-        if (ground != null) ground.position = new Vector3(ground.position.x, low, ground.position.z);
+        // The rough around the green ends at LowestVisualHeight: ground just below, water a bit above
+        // (so the island's bank runs into the water).
+        float low = green.transform.position.y + green.LowestVisualHeight;
+        if (ground != null) ground.position = new Vector3(ground.position.x, low - 0.005f, ground.position.z);
         if (water != null)
         {
             water.gameObject.SetActive(Def.waterAround);
-            water.position = new Vector3(water.position.x, low + 0.005f, water.position.z);
+            water.position = new Vector3(water.position.x, low + 0.08f, water.position.z);
         }
 
         puttIndex = -1;
@@ -143,11 +145,7 @@ public class GreenPracticeController : MonoBehaviour
         if (!green.showContours) green.showContours = true;
         else if (!green.showSlopeColours) green.showSlopeColours = true;
         else green.showContours = green.showSlopeColours = false;
-        int pin = green.pin;
-        green.Rebuild();
-        green.SetPin(pin);
-        hole.position = green.PinWorldPosition(pin);
-        if (idealValid) green.ShowPath(ideal.Result.Path, true);
+        green.RefreshTexture();
     }
 
     public void ToggleIdealLine()
@@ -210,9 +208,10 @@ public class GreenPracticeController : MonoBehaviour
             return;
         }
 
-        string where = green.GrassAt(r.End) == GrassKind.Green ? "" : " (off the green)";
+        GrassKind lie = green.GrassAt(r.End);
+        string where = lie == GrassKind.Fringe ? " (in the fringe)" : lie == GrassKind.Rough ? " (in the rough)" : "";
         result = $"{r}{where}.   Strokes: {strokes}";
-        ball.PlaceAt(ball.transform.position); // next putt from where it stopped
+        ball.PlaceAt(ball.transform.position); // next putt from where it stopped (sitting down in longer grass)
         launcher.AimAtHole();
         if (puttCamera != null) puttCamera.Snap();
     }

@@ -58,7 +58,8 @@ Assets/
 - A green is a `GreenDefinition` (green-local metres, x = right, y = away from the player): outline (oval + wobbles),
   stimp, fringe, height features (tilt %, tiers, mounds/hollows, ridges/swales, crowns), pins, putts.
 - `GreenModel.Build` bakes it into a `HeightField` (10 cm grid, lowest point on the green = 0); `PlacedGreen` puts it
-  in the world (origin + yaw). Friction: green 1, fringe and rough scaled by stimp ratio.
+  in the world (origin + yaw). Friction: green 1, fringe (default stimp 5) and rough (stimp 1.5) scaled by
+  stimp ratio, blended over 10 cm at each edge. The ball sits 3 mm (fringe) / 12 mm (rough) into the grass.
 - Built-in greens in `FamousGreens` ("inspired by", not surveys; no course logos). `GreenTests` checks every green:
   pins ≥ 1 m inside the edge on slopes < 75 % of the holding slope, balls on the green and at rest, putt names state
   the real distance (±10 %), every putt holeable by `PuttSolver`. Add a green there and run the tests.
