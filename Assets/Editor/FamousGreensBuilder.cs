@@ -20,10 +20,30 @@ public static class FamousGreensBuilder
     const string ArrowMeshPath = "Assets/Generated/PuttingGreen/AimArrowMesh.asset";
     const string ArrowMaterialPath = "Assets/Generated/PuttingGreen/AimArrow.mat";
 
-    const string NatureDir = "Assets/ThirdParty/Kenney Nature Pack/Models";
-    // Pines only (018/021/059 are mossy stumps that read as tan rocks); bushes are the all-green flat_* models.
-    static readonly string[] TreeModels = { "naturePack_051.fbx", "naturePack_164.fbx" };
-    static readonly string[] BushModels = { "naturePack_flat_001.fbx", "naturePack_flat_003.fbx", "naturePack_flat_012.fbx", "naturePack_flat_013.fbx" };
+    // Kenney (CC0, in git): fallback scenery. Pines only (018/021/059 are mossy stumps that read as tan rocks);
+    // bushes are the all-green flat_* models.
+    const string NatureDir = "Assets/ThirdParty/Kenney Nature Pack/Models/";
+    static readonly string[] KenneyTrees = { NatureDir + "naturePack_051.fbx", NatureDir + "naturePack_164.fbx" };
+    static readonly string[] KenneyBushes =
+    {
+        NatureDir + "naturePack_flat_001.fbx", NatureDir + "naturePack_flat_003.fbx",
+        NatureDir + "naturePack_flat_012.fbx", NatureDir + "naturePack_flat_013.fbx",
+    };
+
+    // Asset Store trees (Tree9, TreePackVol.1): not in git (licence), used when imported locally.
+    const string StorePack = "Assets/TreePackVol.1/Prefabs/";
+    static readonly string[] StoreTrees =
+    {
+        "Assets/Tree9/Tree9_2.prefab", "Assets/Tree9/Tree9_3.prefab", "Assets/Tree9/Tree9_4.prefab", "Assets/Tree9/Tree9_5.prefab",
+        StorePack + "0/Tree1.prefab", StorePack + "0/Tree3.prefab", StorePack + "0/Tree5.prefab", StorePack + "0/Tree9.prefab",
+        StorePack + "0/Tree10.prefab", StorePack + "3/Tree 1.prefab", StorePack + "3/Tree 3.prefab", StorePack + "3/Tree 4.prefab",
+    };
+    static readonly string[] StoreBushes = { StorePack + "1/Tree.prefab", StorePack + "5/Tree 7.prefab" };
+    static readonly string[] StorePalms =
+    {
+        StorePack + "Palm/Tree 1.prefab", StorePack + "Palm/Tree 2.prefab", StorePack + "Palm/Tree 3.prefab",
+        StorePack + "Palm/Tree 4.prefab", StorePack + "Palm/Tree 5.prefab", StorePack + "Palm/Tree 8.prefab",
+    };
 
     // Flagstick: 7 ft above the green (regulation-ish), standing on the cup bottom; bands every 30 cm.
     const float FlagstickDiameter = 0.016f, FlagstickAboveGreen = 2.13f, StickBand = 0.3f;
@@ -104,8 +124,11 @@ public static class FamousGreensBuilder
 
         // Trees and bushes around the green (re-placed for every green)
         var scenery = new GameObject("Scenery").AddComponent<GreenScenery>();
-        scenery.trees = LoadModels(TreeModels);
-        scenery.bushes = LoadModels(BushModels);
+        scenery.trees = LoadModels(StoreTrees, false);
+        scenery.bushes = LoadModels(StoreBushes, false);
+        scenery.palms = LoadModels(StorePalms, false);
+        scenery.fallbackTrees = LoadModels(KenneyTrees, true);
+        scenery.fallbackBushes = LoadModels(KenneyBushes, true);
         scenery.green = view;
         scenery.Place();
 
@@ -328,14 +351,15 @@ public static class FamousGreensBuilder
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
     }
 
-    static GameObject[] LoadModels(string[] names)
+    // Loads the models that exist; optional ones (Asset Store packs) are skipped silently.
+    static GameObject[] LoadModels(string[] paths, bool required)
     {
         var list = new System.Collections.Generic.List<GameObject>();
-        foreach (string name in names)
+        foreach (string path in paths)
         {
-            var model = AssetDatabase.LoadAssetAtPath<GameObject>($"{NatureDir}/{name}");
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (model != null) list.Add(model);
-            else Debug.LogWarning($"[FamousGreensBuilder] Missing model {NatureDir}/{name}");
+            else if (required) Debug.LogWarning($"[FamousGreensBuilder] Missing model {path}");
         }
         return list.ToArray();
     }

@@ -136,3 +136,9 @@ crashlytics-build.properties
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Asset Store packs (licence: not allowed in a public repo). Import them from My Assets.
+/[Aa]ssets/Tree9/
+/[Aa]ssets/Tree9.meta
+/[Aa]ssets/TreePackVol.1/
+/[Aa]ssets/TreePackVol.1.meta
