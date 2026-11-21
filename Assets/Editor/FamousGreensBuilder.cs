@@ -21,8 +21,9 @@ public static class FamousGreensBuilder
     const string ArrowMaterialPath = "Assets/Generated/PuttingGreen/AimArrow.mat";
 
     const string NatureDir = "Assets/ThirdParty/Kenney Nature Pack/Models";
-    static readonly string[] TreeModels = { "naturePack_051.fbx", "naturePack_164.fbx", "naturePack_059.fbx" };
-    static readonly string[] BushModels = { "naturePack_018.fbx", "naturePack_021.fbx", "naturePack_flat_013.fbx" };
+    // Pines only (018/021/059 are mossy stumps that read as tan rocks); bushes are the all-green flat_* models.
+    static readonly string[] TreeModels = { "naturePack_051.fbx", "naturePack_164.fbx" };
+    static readonly string[] BushModels = { "naturePack_flat_001.fbx", "naturePack_flat_003.fbx", "naturePack_flat_012.fbx", "naturePack_flat_013.fbx" };
 
     // Flagstick: 7 ft above the green (regulation-ish), standing on the cup bottom; bands every 30 cm.
     const float FlagstickDiameter = 0.016f, FlagstickAboveGreen = 2.13f, StickBand = 0.3f;
