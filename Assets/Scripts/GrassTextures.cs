@@ -60,7 +60,7 @@ public static class GrassTextures
     }
 
     // Value noise on a px × py lattice over the unit square; wraps at the edges, so it tiles.
-    static float Noise(float u, float v, int px, int py, int seed)
+    internal static float Noise(float u, float v, int px, int py, int seed)
     {
         float x = u * px, y = v * py;
         int x0 = Mathf.FloorToInt(x), y0 = Mathf.FloorToInt(y);

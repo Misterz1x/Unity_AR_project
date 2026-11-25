@@ -4,24 +4,32 @@ using UnityEngine;
 
 /// <summary>
 /// Trees and bushes around the current green. Re-placed whenever the GreenView rebuilds
-/// (same layout every time for the same green). Generated objects are not saved with the scene.
-/// Island greens get their trees (palms if given) on the far shore, beyond the water.
-/// Models are scaled to a target height, so packs with different units mix. Missing models (e.g. an Asset Store
-/// pack that is not in git) fall back to the fallback lists. Built-in-pipeline tree materials (Tree Creator)
-/// are swapped for URP Lit copies at runtime, so they don't render pink.
+/// (same layout every time for the same green). Spawned objects are not saved with the scene.
+/// Island greens get their trees (palms) on the far shore, beyond the water.
+/// By default everything is generated in code (TreeGenerator), so every clone of the repo looks the same.
+/// With "Generate Trees" off, model lists are used instead (e.g. Asset Store trees, not in git), falling back
+/// to the fallback lists when missing; built-in-pipeline tree materials (Tree Creator) get URP Lit copies.
+/// Everything is scaled to a target height, so different sources mix.
 /// </summary>
 [ExecuteAlways]
 public class GreenScenery : MonoBehaviour
 {
     public GreenView green;
+
+    [Tooltip("Generate trees, palms and bushes in code. Off = use the model lists below.")]
+    public bool generateTrees = true;
+    [Tooltip("Different generated models per kind.")]
+    [Range(1, 12)] public int variants = 5;
+    [Tooltip("Share of conifers among the generated trees.")]
+    [Range(0f, 1f)] public float coniferShare = 0.35f;
+
+    [Header("Models (used when Generate Trees is off)")]
     [Tooltip("Tree models (e.g. Asset Store trees, not in git).")]
     public GameObject[] trees;
-    [Tooltip("Bush models.")]
     public GameObject[] bushes;
     [Tooltip("Trees for island greens (empty = trees).")]
     public GameObject[] palms;
-
-    [Header("Fallback (used when the lists above have no models, e.g. on a fresh clone)")]
+    [Tooltip("Used when the lists above have no models (e.g. on a fresh clone).")]
     public GameObject[] fallbackTrees;
     public GameObject[] fallbackBushes;
 
@@ -41,8 +49,11 @@ public class GreenScenery : MonoBehaviour
     [Tooltip("Island greens: radius (m from the green centre) of the far shore with trees.")]
     public Vector2 shoreRadius = new Vector2(68f, 90f);
 
+    delegate GameObject Maker(System.Random rng);
+
     readonly List<GameObject> spawned = new List<GameObject>();
     static readonly Dictionary<Material, Material> urpCopies = new Dictionary<Material, Material>();
+    TreeKit kit;
 
     void OnEnable()
     {
@@ -57,7 +68,20 @@ public class GreenScenery : MonoBehaviour
     {
         if (green != null) green.Rebuilt -= Place;
         Clear();
+        kit?.Dispose();
+        kit = null;
     }
+
+#if UNITY_EDITOR
+    // Re-place after Inspector changes (not allowed directly inside OnValidate).
+    void OnValidate()
+    {
+        UnityEditor.EditorApplication.delayCall += () =>
+        {
+            if (this != null && isActiveAndEnabled && green != null && green.Model != null) Place();
+        };
+    }
+#endif
 
     public void Place()
     {
@@ -84,40 +108,81 @@ public class GreenScenery : MonoBehaviour
             return new Vector3(w.x, groundY, w.y);
         }
 
-        void Scatter(int count, GameObject[] models, Vector2 height, System.Func<float, Vector3> position)
+        void Scatter(int count, List<Maker> makers, Vector2 height, System.Func<float, Vector3> position)
         {
-            if (models.Length == 0) return;
+            if (makers.Count == 0) return;
             for (int i = 0; i < count; i++)
             {
-                GameObject model = models[rng.Next(models.Length)];
+                Maker make = makers[rng.Next(makers.Count)];
                 float phi = (i + (float)rng.NextDouble()) / count * 2f * Mathf.PI;
                 Vector3 pos = position(phi); // consume random numbers in the same order every time
                 float yaw = (float)rng.NextDouble() * 360f;
                 float h = Range(height);
-                GameObject go = Instantiate(model, pos, Quaternion.Euler(0f, yaw, 0f), transform);
+                GameObject go = make(rng);
                 go.hideFlags = HideFlags.DontSave;
+                go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
                 float modelHeight = HeightOf(go);
-                go.transform.localScale = model.transform.localScale * (modelHeight > 0.01f ? h / modelHeight : 1f);
-                UseUrpMaterials(go);
+                go.transform.localScale *= modelHeight > 0.01f ? h / modelHeight : 1f;
                 spawned.Add(go);
             }
         }
 
-        GameObject[] treeModels = Usable(trees, fallbackTrees);
-        GameObject[] bushModels = Usable(bushes, fallbackBushes);
-        if (d.waterAround)
+        List<Maker> treeMakers, bushMakers, palmMakers;
+        if (generateTrees)
         {
-            GameObject[] palmModels = Usable(palms, null);
-            if (palmModels.Length > 0) Scatter(farTrees + nearTrees, palmModels, palmHeight, OnShore);
-            else Scatter(farTrees + nearTrees, treeModels, treeHeight, OnShore);
-            Scatter(bushCount, bushModels, bushHeight, OnShore);
+            if (kit == null || kit.Variants != variants)
+            {
+                kit?.Dispose();
+                kit = new TreeKit(variants);
+            }
+            int conifers = Mathf.RoundToInt(coniferShare * 10f);
+            treeMakers = Generated(kit.Broadleaf, 10 - conifers);
+            treeMakers.AddRange(Generated(kit.Conifers, conifers));
+            bushMakers = Generated(kit.Bushes, 1);
+            palmMakers = Generated(kit.Palms, 1);
         }
         else
         {
-            Scatter(nearTrees, treeModels, treeHeight, phi => AroundGreen(phi, Range(nearTreeGap)));
-            Scatter(farTrees, treeModels, treeHeight, phi => AroundGreen(phi, Range(farTreeGap)));
-            Scatter(bushCount, bushModels, bushHeight, phi => AroundGreen(phi, Range(bushGap)));
+            treeMakers = Models(Usable(trees, fallbackTrees));
+            bushMakers = Models(Usable(bushes, fallbackBushes));
+            palmMakers = Models(Usable(palms, null));
         }
+
+        if (d.waterAround)
+        {
+            if (palmMakers.Count > 0) Scatter(farTrees + nearTrees, palmMakers, palmHeight, OnShore);
+            else Scatter(farTrees + nearTrees, treeMakers, treeHeight, OnShore);
+            Scatter(bushCount, bushMakers, bushHeight, OnShore);
+        }
+        else
+        {
+            Scatter(nearTrees, treeMakers, treeHeight, phi => AroundGreen(phi, Range(nearTreeGap)));
+            Scatter(farTrees, treeMakers, treeHeight, phi => AroundGreen(phi, Range(farTreeGap)));
+            Scatter(bushCount, bushMakers, bushHeight, phi => AroundGreen(phi, Range(bushGap)));
+        }
+    }
+
+    // Each generated model 'weight' times (weight 0 = none).
+    List<Maker> Generated(List<TreeKit.Proto> protos, int weight)
+    {
+        var list = new List<Maker>();
+        for (int w = 0; w < weight; w++)
+            foreach (TreeKit.Proto p in protos)
+                list.Add(rng => kit.Spawn(p, transform, rng));
+        return list;
+    }
+
+    List<Maker> Models(GameObject[] models)
+    {
+        var list = new List<Maker>();
+        foreach (GameObject model in models)
+            list.Add(rng =>
+            {
+                GameObject go = Instantiate(model, transform);
+                UseUrpMaterials(go);
+                return go;
+            });
+        return list;
     }
 
     // The non-missing models of the first list, or of the fallback list if the first has none.

@@ -125,6 +125,7 @@ public static class FamousGreensBuilder
 
         // Trees and bushes around the green (re-placed for every green)
         var scenery = new GameObject("Scenery").AddComponent<GreenScenery>();
+        scenery.generateTrees = true; // our own trees (TreeGenerator); the model lists below are optional
         scenery.trees = LoadModels(StoreTrees, false);
         scenery.bushes = LoadModels(StoreBushes, false);
         scenery.palms = LoadModels(StorePalms, false);
