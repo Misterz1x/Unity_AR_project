@@ -82,7 +82,7 @@ Validation targets (20 putts): speed ±10%, direction ±1° (1° ≈ 5.2 cm side
 
 ## Repo rules
 - **One owner per scene and prefab.** Scenes merge badly; don't edit a `.unity`/`.prefab` the current user doesn't own.
-- Asset Store packs are never committed (public repo): gitignore them (e.g. `Assets/Tree9/`, `Assets/TreePackVol.1/`) and keep a CC0 fallback (`GreenScenery` falls back to Kenney models).
+- Asset Store packs are never committed (public repo): gitignore them (e.g. `Assets/Tree9/`, `Assets/TreePackVol.1/`). Scenery trees are our own (`TreeGenerator`, generated in code); store/Kenney models are optional (`GreenScenery.generateTrees` off).
 - Commit `.meta` files with their assets. Never commit `Library/`, `Temp/`, `Obj/`, `Build/`, `Logs/`, `UserSettings/`.
 - Small commits, pull daily, push before stopping for the day.
 
